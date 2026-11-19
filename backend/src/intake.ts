@@ -21,7 +21,7 @@ export interface IntakeDeps {
   aliasDomain: string;
 }
 
-/** Entry point for emailed invites (Logic App -> backend). Errors from the bot provider propagate (HTTP 500) so the Logic App retries. */
+/** Entry point for emailed invites (SendGrid inbound route, or the JSON intake). Errors from the bot provider propagate (HTTP 500) so the sender retries. */
 export async function handleInvite(email: InviteEmail, deps: IntakeDeps): Promise<IntakeResult> {
   const parsed = parseInvite(email, deps.aliasDomain);
   if (parsed.aliasTags.length === 0) return { status: "ignored", reason: "no_alias" };

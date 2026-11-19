@@ -1,21 +1,35 @@
 import { timingSafeEqual } from "node:crypto";
+import multipart from "@fastify/multipart";
 import Fastify, { type FastifyInstance } from "fastify";
+import { aliasAddress, generateAlias } from "./alias.js";
 import { type SegmentHandler } from "./events.js";
+import { parseSendGridInbound } from "./inbound.js";
 import { handleInvite, handlePastedLink, type IntakeDeps } from "./intake.js";
 import type { InviteEmail } from "./invite.js";
 import { handleRecallWebhook, verifyRecallSignature } from "./recallWebhook.js";
-import type { TranscriptStore } from "./store.js";
+import type { InboundMessageLog, TranscriptStore } from "./store.js";
+
+/** Largest inbound e-mail we accept. Invites are tiny; anything near this is junk or a mail with big attachments. */
+const MAX_INBOUND_BYTES = 12 * 1024 * 1024;
 
 export interface AppConfig extends IntakeDeps {
   /**
    * Spike auth for /api/*: shared bearer secret.
-   * TODO(prod): validate the Entra JWT from the Logic App's managed identity
-   * (audience = this API's app ID, check `oid` of the managed identity).
+   * TODO(prod): replace with real authentication (Entra) once the portal exists; browsers must never hold this token.
    */
   intakeToken: string;
   enableDevRoutes: boolean;
   /** Workspace verification secret from the Recall dashboard (whsec_...). Without it the webhook route answers 503. */
   recallWebhookSecret?: string;
+  /**
+   * Secret that is part of the SendGrid Inbound Parse URL (/inbound/sendgrid/<token>). SendGrid does not sign these
+   * requests, so the secret path is what keeps strangers from posting fake invites. Without it the route answers 503.
+   */
+  inboundToken?: string;
+  /** Require SPF or DKIM "pass" on inbound mail (default true). Turn off only for local experiments. */
+  requireSenderAuth?: boolean;
+  /** Remembers processed inbound messages so a repeated delivery does not create a second bot. */
+  messageLog?: InboundMessageLog;
   /** Where final transcript segments are persisted. */
   transcripts?: TranscriptStore;
   /** Called for every final/partial transcript segment. */
@@ -41,14 +55,34 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
     }
   });
 
-  // Logic App -> here. Body shape is defined in infra/logic-app/workflow.json
+  // Generic JSON intake (manual tests, or any other mail source). The SendGrid route below is the production path.
   app.post<{ Body: InviteEmail }>("/api/intake/meeting-invite", async (req, reply) => {
     const b = req.body;
     if (!b || typeof b.body !== "string" || typeof b.to !== "string" || typeof b.messageId !== "string") {
       return reply.code(400).send({ error: "invalid payload" });
     }
-    // 200 even for ignored/rejected so the Logic App doesn't retry non-errors
+    // 200 even for ignored/rejected so callers don't retry non-errors
     return handleInvite({ ...b, from: b.from ?? "", subject: b.subject ?? "" }, cfg);
+  });
+
+  // Create a paid-interview record and its invite address. Until the portal exists this is how interviews are created
+  // (called by an operator with the bearer token). Payment is not enforced here yet.
+  app.post<{ Body: { ownerEmail: string } }>("/api/interviews", async (req, reply) => {
+    const ownerEmail = req.body?.ownerEmail;
+    if (typeof ownerEmail !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmail)) {
+      return reply.code(400).send({ error: "ownerEmail must be an e-mail address" });
+    }
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const alias = generateAlias();
+      const interview = { id: crypto.randomUUID(), alias, ownerEmail, status: "paid" as const };
+      try {
+        await cfg.store.save(interview);
+      } catch {
+        continue; // alias collision (practically impossible at 50 bits); try another
+      }
+      return { id: interview.id, alias, address: aliasAddress(alias, cfg.aliasDomain) };
+    }
+    return reply.code(500).send({ error: "could not allocate an alias" });
   });
 
   // Portal paste-link fallback
@@ -85,6 +119,44 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
       }
       // 200 for events we do not use, otherwise Recall retries them (up to 60 times for real-time endpoints)
       return handleRecallWebhook(payload, cfg);
+    });
+  });
+
+  // SendGrid Inbound Parse -> here: the interviewer's meeting invite, sent to iv-<alias>@<alias domain>.
+  // Own scope, because multipart parsing must not apply to the other routes.
+  app.register(async (scope) => {
+    await scope.register(multipart, {
+      attachFieldsToBody: "keyValues",
+      limits: { fieldSize: MAX_INBOUND_BYTES, fileSize: MAX_INBOUND_BYTES, files: 20, fields: 40 },
+    });
+
+    scope.post<{ Params: { token: string } }>("/inbound/sendgrid/:token", { bodyLimit: MAX_INBOUND_BYTES }, async (req, reply) => {
+      if (!cfg.inboundToken) return reply.code(503).send({ error: "inbound e-mail not configured" });
+      if (!tokenOk(req.params.token, cfg.inboundToken)) return reply.code(401).send({ error: "unauthorized" });
+
+      // multipart "keyValues" mode: text fields arrive as strings, any file part as a Buffer
+      const fields: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries((req.body ?? {}) as Record<string, unknown>)) {
+        fields[k] = typeof v === "string" ? v : Buffer.isBuffer(v) ? v.toString("utf8") : undefined;
+      }
+
+      const parsed = await parseSendGridInbound(fields);
+      // 200 for everything we deliberately skip: a non-2xx makes SendGrid redeliver the same mail again and again.
+      if (!parsed) {
+        console.warn("[inbound] no raw MIME in the request: set 'POST the raw, full MIME message' on the Inbound Parse host");
+        return { status: "ignored", reason: "raw_mime_required" };
+      }
+      if (cfg.requireSenderAuth !== false && !parsed.senderAuthenticated) {
+        return { status: "ignored", reason: "sender_not_authenticated" };
+      }
+      if (cfg.messageLog && (await cfg.messageLog.hasMessageSeen(parsed.invite.messageId))) {
+        return { status: "ignored", reason: "duplicate_message" };
+      }
+
+      // A provider failure here throws -> HTTP 500 -> SendGrid retries later (the message is not yet marked as seen).
+      const result = await handleInvite(parsed.invite, cfg);
+      await cfg.messageLog?.markMessageSeen(parsed.invite.messageId);
+      return result;
     });
   });
 

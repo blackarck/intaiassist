@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { vi } from "vitest";
 import type { BotController, BotPlan } from "../src/botController.js";
 import type { Interview } from "../src/store.js";
@@ -44,4 +45,30 @@ export function icsB64(method: string, uid: string, dtstart?: string) {
   if (dtstart) lines.push(`DTSTART:${dtstart}`);
   lines.push("END:VEVENT", "END:VCALENDAR");
   return Buffer.from(lines.join("\r\n")).toString("base64");
+}
+
+/** A fixture e-mail with CRLF line endings, like real mail on the wire. */
+export function fixtureEmail(name: string): string {
+  return readFileSync(new URL(`./fixtures/${name}.eml`, import.meta.url), "utf8").replace(/\r?\n/g, "\r\n");
+}
+
+/** multipart/form-data body the way SendGrid Inbound Parse posts it (raw MIME mode: all text fields). */
+export function multipartBody(fields: Record<string, string>, boundary = "----sendgridtestboundary") {
+  const parts = Object.entries(fields)
+    .map(([k, v]) => `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`)
+    .join("");
+  return { payload: `${parts}--${boundary}--\r\n`, headers: { "content-type": `multipart/form-data; boundary=${boundary}` } };
+}
+
+/** The fields SendGrid sends in raw mode for a message that authenticates fine. */
+export function sendgridFields(raw: string, envelopeTo: string[], over: Record<string, string> = {}) {
+  return {
+    email: raw,
+    envelope: JSON.stringify({ to: envelopeTo, from: "recruiter@acme.com" }),
+    SPF: "pass",
+    dkim: "{@acme.com : pass}",
+    sender_ip: "203.0.113.7",
+    spam_score: "0.1",
+    ...over,
+  };
 }

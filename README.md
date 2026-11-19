@@ -4,16 +4,16 @@ A bot joins the interviewer's video call (Teams, Zoom or Google Meet), listens, 
 privately. Meeting access and live transcription come from [Recall.ai](https://docs.recall.ai); this repo is the
 backend that schedules the bot, receives the live transcript, and (next) turns it into coaching.
 
-Docs: [plan](doc/plan.md) · [Recall integration](doc/recall-integration.md) · [data & backups](doc/data.md) · [end-to-end flow](doc/flow.md) ·
+Docs: [plan](doc/plan.md) · [hosting & DNS](doc/hosting.md) · [inbound e-mail](doc/inbound-email.md) · [Recall integration](doc/recall-integration.md) · [data & backups](doc/data.md) · [end-to-end flow](doc/flow.md) ·
 [why not our own Teams bot](doc/bot-join-research.md).
 
 ## How it works
 
 ```
-interviewer adds iv-7KQ2@<our domain> to the meeting invite
-        │  (mailbox in our tenant)
-Logic App ──POST──►  backend /api/intake/meeting-invite
-                      │  parse link (Teams/Zoom/Meet), match alias → paid interview
+interviewer adds iv-K7M2QX9WPB@invite.askproso.ai to the meeting invite
+        │  (no mailbox: the subdomain's MX record points at SendGrid)
+SendGrid Inbound Parse ──POST──►  backend /inbound/sendgrid/<secret>
+                      │  parse link (Teams/Zoom/Meet) + calendar data, match alias → paid interview
                       ▼
                  Recall: create bot (scheduled for the start time, or immediate)
                       │
@@ -27,9 +27,9 @@ Logic App ──POST──►  backend /api/intake/meeting-invite
 
 | Path | What | State |
 |---|---|---|
-| `backend/` | TypeScript (Fastify). Invite intake, Recall client, bot scheduling, webhook receiver, SQLite persistence | **94 tests pass**; not yet run against live Recall |
+| `backend/` | TypeScript (Fastify). Inbound invite e-mail, Recall client, bot scheduling, webhook receiver, SQLite persistence | **124 tests pass**; not yet run against live Recall or SendGrid |
 | `deploy/` | Docker Compose: backend + Caddy (automatic HTTPS), nightly DB backup | Written, **first deploy pending DNS** |
-| `infra/logic-app/` | Logic App that forwards invite emails from the bot mailbox to the backend | Written, **not deployed** |
+| `infra/sendgrid/` | Script to create the SendGrid Inbound Parse host | Written, **not run** |
 | `infra/azure/` | `provision.sh`: resource group + Key Vault | Used |
 | `teams-app/` | Optional Teams chat app for private coaching messages (chat only) | Manifest packs, **not sideloaded** |
 | `doc/` | Plan, flow, Recall integration guide, research history | |

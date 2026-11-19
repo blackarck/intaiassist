@@ -1,0 +1,50 @@
+From: Recruiter <recruiter@acme.com>
+To: candidate@gmail.com
+Subject: Invitation: Interview @ Fri Nov 20, 2026 3:30pm (IST)
+Message-ID: <google-1@acme.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixed-g"
+
+--mixed-g
+Content-Type: multipart/alternative; boundary="alt-g"
+
+--alt-g
+Content-Type: text/plain; charset="UTF-8"
+
+You have been invited. Join with Google Meet: https://meet.google.com/abc-defg-hij
+
+--alt-g
+Content-Type: text/html; charset="UTF-8"
+
+<html><body>Join with <a href="https://meet.google.com/abc-defg-hij">Google Meet</a></body></html>
+
+--alt-g
+Content-Type: text/calendar; charset="UTF-8"; method=REQUEST
+
+BEGIN:VCALENDAR
+METHOD:REQUEST
+VERSION:2.0
+BEGIN:VEVENT
+UID:google-uid-1@google.com
+DTSTART:20261120T100000Z
+SUMMARY:Interview
+END:VEVENT
+END:VCALENDAR
+
+--alt-g--
+
+--mixed-g
+Content-Type: application/ics; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+
+BEGIN:VCALENDAR
+METHOD:REQUEST
+VERSION:2.0
+BEGIN:VEVENT
+UID:google-uid-1@google.com
+DTSTART:20261120T100000Z
+SUMMARY:Interview
+END:VEVENT
+END:VCALENDAR
+
+--mixed-g--

@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { TranscriptSegment } from "../src/meetingSource.js";
 import { SqliteStore } from "../src/sqliteStore.js";
-import { InMemoryStore, type Interview, type InterviewStore, type TranscriptStore } from "../src/store.js";
+import { InMemoryStore, type InboundMessageLog, type Interview, type InterviewStore, type TranscriptStore } from "../src/store.js";
 
 const base: Interview = { id: "i-1", alias: "7KQ2", ownerEmail: "r@acme.com", status: "paid" };
 const seg = (over: Partial<TranscriptSegment> = {}): TranscriptSegment => ({
@@ -23,7 +23,7 @@ const seg = (over: Partial<TranscriptSegment> = {}): TranscriptSegment => ({
 /**
  * One contract, run against every store implementation. A future Postgres/Cosmos store must pass this unchanged.
  */
-function contract(name: string, make: () => InterviewStore & TranscriptStore) {
+function contract(name: string, make: () => InterviewStore & TranscriptStore & InboundMessageLog) {
   describe(`store contract: ${name}`, () => {
     it("returns undefined for unknown ids, aliases and bot ids", async () => {
       const s = make();
@@ -101,6 +101,15 @@ function contract(name: string, make: () => InterviewStore & TranscriptStore) {
       expect(got?.endMs).toBeUndefined();
     });
 
+    it("remembers processed inbound messages", async () => {
+      const s = make();
+      expect(await s.hasMessageSeen("<a@x>")).toBe(false);
+      await s.markMessageSeen("<a@x>");
+      await s.markMessageSeen("<a@x>"); // marking twice is harmless
+      expect(await s.hasMessageSeen("<a@x>")).toBe(true);
+      expect(await s.hasMessageSeen("<b@x>")).toBe(false);
+    });
+
     it("keeps transcripts per interview and deletes only the requested one", async () => {
       const s = make();
       await s.save(base);
@@ -133,21 +142,23 @@ describe("SqliteStore specifics", () => {
     const a = new SqliteStore(file);
     await a.save({ ...base, recallBotId: "bot-1", status: "in_meeting" });
     await a.appendSegment(seg());
+    await a.markMessageSeen("<m@x>");
     a.close();
 
     const b = new SqliteStore(file);
     expect((await b.findByBotId("bot-1"))?.status).toBe("in_meeting");
     expect(await b.listSegments("i-1")).toHaveLength(1);
+    expect(await b.hasMessageSeen("<m@x>")).toBe(true);
     b.close();
   });
 
   it("applies migrations once and is safe to reopen", () => {
     const file = join(tmp(), "db.sqlite");
     const a = new SqliteStore(file);
-    expect(a.schemaVersion).toBe(1);
+    expect(a.schemaVersion).toBe(2);
     a.close();
     const b = new SqliteStore(file);
-    expect(b.schemaVersion).toBe(1);
+    expect(b.schemaVersion).toBe(2);
     b.close();
   });
 

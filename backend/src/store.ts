@@ -55,10 +55,21 @@ export interface TranscriptStore {
   deleteSegments(interviewId: string): Promise<void>;
 }
 
+/**
+ * Remembers which inbound e-mails were already processed. SendGrid (like any webhook sender) can deliver the same
+ * message more than once; without this a repeated invite would create a second bot.
+ * Check first, mark only AFTER successful processing, so a failed attempt is retried and not swallowed.
+ */
+export interface InboundMessageLog {
+  hasMessageSeen(messageId: string): Promise<boolean>;
+  markMessageSeen(messageId: string): Promise<void>;
+}
+
 /** Process-memory store for tests and quick local runs. State is lost on restart. */
-export class InMemoryStore implements InterviewStore, TranscriptStore {
+export class InMemoryStore implements InterviewStore, TranscriptStore, InboundMessageLog {
   private byId = new Map<string, Interview>();
   private segments = new Map<string, TranscriptSegment[]>();
+  private seen = new Set<string>();
 
   async findByAlias(alias: string) {
     for (const i of this.byId.values()) if (i.alias === alias.toUpperCase()) return { ...i };
@@ -89,5 +100,12 @@ export class InMemoryStore implements InterviewStore, TranscriptStore {
   }
   async deleteSegments(interviewId: string) {
     this.segments.delete(interviewId);
+  }
+
+  async hasMessageSeen(messageId: string) {
+    return this.seen.has(messageId);
+  }
+  async markMessageSeen(messageId: string) {
+    this.seen.add(messageId);
   }
 }

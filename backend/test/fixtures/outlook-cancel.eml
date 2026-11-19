@@ -1,0 +1,25 @@
+From: Recruiter <recruiter@acme.com>
+To: Candidate <candidate@gmail.com>
+Subject: Canceled: Interview: Backend Engineer
+Message-ID: <outlook-2@acme.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-c"
+
+--alt-c
+Content-Type: text/plain; charset="utf-8"
+
+The meeting was canceled.
+
+--alt-c
+Content-Type: text/calendar; charset="utf-8"; method=CANCEL
+
+BEGIN:VCALENDAR
+METHOD:CANCEL
+VERSION:2.0
+BEGIN:VEVENT
+UID:040000008200E00074C5B7101A82E00800000000OUTLOOK1
+STATUS:CANCELLED
+END:VEVENT
+END:VCALENDAR
+
+--alt-c--

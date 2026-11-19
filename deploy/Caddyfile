@@ -3,22 +3,35 @@
 	# Caddy obtains and renews the Let's Encrypt certificate for {$DOMAIN} by itself.
 }
 
-{$DOMAIN} {
-	encode zstd gzip
-
-	# Recall webhooks and the Logic App payloads are small; refuse anything large.
-	request_body {
-		max_size 6MB
-	}
-
+(proxy) {
 	reverse_proxy backend:3000 {
 		health_uri /health
 		health_interval 10s
 	}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
 
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		-Server
+	}
+
+	# Inbound e-mail from SendGrid can carry attachments (the backend itself caps it at 12 MB).
+	handle /inbound/* {
+		request_body {
+			max_size 13MB
+		}
+		import proxy
+	}
+
+	# Everything else (Recall webhooks, API) is small.
+	handle {
+		request_body {
+			max_size 6MB
+		}
+		import proxy
 	}
 }

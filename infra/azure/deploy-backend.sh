@@ -11,7 +11,7 @@ VM_NAME="${VM_NAME:-intassist-backend}"
 KEY_VAULT="${KEY_VAULT:-vaiintassist-kv-f9ea}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/intassist_vm}"
 DOMAIN="${DOMAIN:-intassistback.askproso.ai}"
-ALIAS_DOMAIN="${ALIAS_DOMAIN:-askproso.ai}"      # domain of the invite mailbox (iv-XXXX@<this>); change when the mailbox exists
+ALIAS_DOMAIN="${ALIAS_DOMAIN:-invite.askproso.ai}"   # the SendGrid Inbound Parse subdomain: invites go to iv-<alias>@<this>
 RECALL_REGION="${RECALL_REGION:-us-west-2}"
 
 [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ && "$ALIAS_DOMAIN" =~ ^[a-z0-9.-]+$ && "$RECALL_REGION" =~ ^[a-z]{2}-[a-z]+-[0-9]$ ]] || { echo "bad DOMAIN / ALIAS_DOMAIN / RECALL_REGION"; exit 1; }
@@ -70,6 +70,7 @@ umask 077
   echo "RECALL_API_KEY=$(get recall-api-key)"
   echo "RECALL_WEBHOOK_SECRET=$(get recall-webhook-secret)"
   echo "INTAKE_TOKEN=$(get intake-token)"
+  echo "INBOUND_TOKEN=$(get inbound-token)"
 } > /opt/intassist/.env.new
 mv /opt/intassist/.env.new /opt/intassist/.env
 echo "env written ($(grep -c '=' /opt/intassist/.env) variables, mode $(stat -c %a /opt/intassist/.env))"

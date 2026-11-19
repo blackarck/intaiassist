@@ -1,0 +1,37 @@
+From: Recruiter <recruiter@acme.com>
+To: Candidate <candidate@gmail.com>, Interview Assistant <iv-K7M2QX9WPB@invite.askproso.ai>
+Subject: Interview: Backend Engineer
+Message-ID: <outlook-1@acme.com>
+Date: Fri, 20 Nov 2026 08:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-outlook"
+
+--alt-outlook
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Join the meeting now: https://teams.microsoft.com/l/meetup-join/19%3ameeting_ABC%40thread.v2/0?context=%7b%22Tid%22%3a%22t%22%7d
+
+--alt-outlook
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<html><body><a href="https://nam12.safelinks.protection.outlook.com/?url=https%3A%2F%2Fteams.microsoft.com%2Fl%2Fmeetup-join%2F19%253ameeting_ABC%2540thread.v2%2F0%3Fcontext%3D%257b%2522Tid%2522%253a%2522t%2522%257d&amp;data=05">Join the meeting now</a></body></html>
+
+--alt-outlook
+Content-Type: text/calendar; charset="utf-8"; method=REQUEST
+Content-Transfer-Encoding: 7bit
+
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:Microsoft Exchange Server 2010
+VERSION:2.0
+BEGIN:VEVENT
+UID:040000008200E00074C5B7101A82E00800000000OUTLOOK1
+DTSTART:20261120T100000Z
+DTEND:20261120T110000Z
+SUMMARY:Interview: Backend Engineer
+END:VEVENT
+END:VCALENDAR
+
+--alt-outlook--

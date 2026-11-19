@@ -6,7 +6,7 @@ import { InMemoryStore } from "./store.js";
 
 const intakeToken = process.env.INTAKE_TOKEN;
 if (!intakeToken) {
-  console.error("INTAKE_TOKEN is required (shared secret the Logic App sends as a Bearer token)");
+  console.error("INTAKE_TOKEN is required (bearer token for /api/*)");
   process.exit(1);
 }
 
@@ -52,10 +52,13 @@ else console.warn("DATABASE_PATH not set: using the in-memory store (state is lo
 const app = buildApp({
   store,
   transcripts: store,
+  messageLog: store,
   controller,
   aliasDomain,
   intakeToken,
   recallWebhookSecret: RECALL_WEBHOOK_SECRET,
+  inboundToken: process.env.INBOUND_TOKEN,
+  requireSenderAuth: process.env.INBOUND_REQUIRE_AUTH !== "false",
   enableDevRoutes: process.env.NODE_ENV !== "production",
   onSegment: (s) =>
     console.log(`[segment] ${s.role ?? "?"} ${s.speakerName ?? s.speakerId}${s.isFinal ? "" : " (partial)"}: ${s.text}`),

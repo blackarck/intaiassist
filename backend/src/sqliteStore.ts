@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { MeetingPlatform } from "./invite.js";
 import type { TranscriptSegment } from "./meetingSource.js";
-import type { Interview, InterviewStatus, InterviewStore, TranscriptStore } from "./store.js";
+import type { InboundMessageLog, Interview, InterviewStatus, InterviewStore, TranscriptStore } from "./store.js";
 
 /**
  * Schema versions, applied in order and tracked with SQLite's `PRAGMA user_version`.
@@ -48,6 +48,15 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX transcript_segments_interview ON transcript_segments (interview_id, start_ms);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE inbound_messages (
+        message_id  TEXT PRIMARY KEY,
+        received_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 type Row = Record<string, string | number | null | bigint | Uint8Array>;
@@ -88,7 +97,7 @@ function toSegment(r: Row): TranscriptSegment {
  * One file, WAL mode (readers never block the writer, crash-safe). Fine for a single backend instance;
  * replace with a network database when running more than one.
  */
-export class SqliteStore implements InterviewStore, TranscriptStore {
+export class SqliteStore implements InterviewStore, TranscriptStore, InboundMessageLog {
   private readonly db: DatabaseSync;
 
   constructor(readonly path: string) {
@@ -183,6 +192,17 @@ export class SqliteStore implements InterviewStore, TranscriptStore {
   }
   async deleteSegments(interviewId: string) {
     this.db.prepare("DELETE FROM transcript_segments WHERE interview_id = ?").run(interviewId);
+  }
+
+  // ---- inbound e-mail de-duplication
+
+  async hasMessageSeen(messageId: string) {
+    return this.db.prepare("SELECT 1 FROM inbound_messages WHERE message_id = ?").get(messageId) !== undefined;
+  }
+  async markMessageSeen(messageId: string) {
+    this.db
+      .prepare("INSERT INTO inbound_messages (message_id, received_at) VALUES (?, ?) ON CONFLICT(message_id) DO NOTHING")
+      .run(messageId, new Date().toISOString());
   }
 
   // ---- operations

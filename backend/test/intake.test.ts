@@ -117,7 +117,7 @@ describe("intake API", () => {
     expect(res.json()).toEqual({ status: "ignored", reason: "interview_in_progress" });
   });
 
-  it("returns 500 (so the Logic App retries) when the bot provider fails, and stores nothing", async () => {
+  it("returns 500 (so the sender retries) when the bot provider fails, and stores nothing", async () => {
     controller.schedule = async () => {
       throw new Error("recall is down");
     };

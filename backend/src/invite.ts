@@ -1,5 +1,5 @@
 /**
- * Parses a meeting-invite email (as forwarded by the Logic App) into the data the orchestrator needs: the meeting
+ * Parses a meeting-invite email (decoded from SendGrid Inbound Parse, see inbound.ts) into the data the orchestrator needs: the meeting
  * link (Teams, Zoom or Google Meet), which interview alias it was sent to, and (from the ICS attachment, when present)
  * the stable meeting UID, method and start time.
  *
@@ -9,7 +9,7 @@
 export interface InviteAttachment {
   name: string;
   contentType?: string;
-  /** base64 content as provided by the Logic App connector */
+  /** base64 content of the calendar attachment */
   contentBytes: string;
 }
 

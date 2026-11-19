@@ -44,7 +44,7 @@ sequenceDiagram
     actor I as Interviewer
     actor C as Candidate
     participant P as Portal + Backend
-    participant LA as Logic App (assistant@ mailbox)
+    participant LA as SendGrid Inbound Parse (invite subdomain)
     participant T as Teams meeting
     participant B as Media bot (Windows)
     participant S as Azure Speech
@@ -101,7 +101,7 @@ sequenceDiagram
 - **Onboarding:** the first time, the interviewer clicks "Add to Teams". This installs our app, and we capture the 1:1 `conversationId`.
 
 ### 2. Invite → schedule
-- Logic App → backend (see research doc section 4.1). The backend extracts the join URL and schedules a job (Service Bus scheduled message) for T-1 min.
+- SendGrid Inbound Parse → backend (see inbound-email.md). The backend extracts the join URL and start time, and Recall schedules the bot for T-1 min.
 - The chat bot confirms receipt in the 1:1 chat. If not installed, we email from `assistant@`.
 
 ### 3. Join and lobby

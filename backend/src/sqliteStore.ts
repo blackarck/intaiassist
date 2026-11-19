@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { MeetingPlatform } from "./invite.js";
 import type { TranscriptSegment } from "./meetingSource.js";
 import type { AiConfigStore, AiRun, AiRunLog, TaskOverride } from "./ai/configStore.js";
+import type { RoomAnswer, RoomEvent, RoomEventType, RoomQuestion, RoomScore, RoomSetup, RoomStore } from "./room/types.js";
 import type { InboundMessageLog, Interview, InterviewStatus, InterviewStore, TranscriptStore } from "./store.js";
 
 /**
@@ -84,6 +85,47 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX ai_runs_at ON ai_runs (at);
     `,
   },
+  {
+    version: 4,
+    sql: `
+      -- The live coaching room. JSON in "data" keeps the shape flexible while the product settles; the columns beside it are
+      -- the ones we query by. Everything cascades with the interview (retention / deletion).
+      CREATE TABLE room_setup (
+        interview_id TEXT PRIMARY KEY REFERENCES interviews (id) ON DELETE CASCADE,
+        data         TEXT NOT NULL
+      );
+      CREATE TABLE room_questions (
+        id           TEXT PRIMARY KEY,
+        interview_id TEXT NOT NULL REFERENCES interviews (id) ON DELETE CASCADE,
+        data         TEXT NOT NULL
+      );
+      CREATE INDEX room_questions_interview ON room_questions (interview_id);
+      CREATE TABLE room_answers (
+        id           TEXT PRIMARY KEY,
+        interview_id TEXT NOT NULL REFERENCES interviews (id) ON DELETE CASCADE,
+        start_ms     INTEGER NOT NULL,
+        data         TEXT NOT NULL
+      );
+      CREATE INDEX room_answers_interview ON room_answers (interview_id, start_ms);
+      CREATE TABLE room_scores (
+        answer_id    TEXT NOT NULL,
+        version      INTEGER NOT NULL,
+        interview_id TEXT NOT NULL REFERENCES interviews (id) ON DELETE CASCADE,
+        data         TEXT NOT NULL,
+        PRIMARY KEY (answer_id, version)
+      );
+      CREATE INDEX room_scores_interview ON room_scores (interview_id);
+      -- Replay log for the live feed. seq is global but only ever compared within one interview.
+      CREATE TABLE room_events (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        interview_id TEXT NOT NULL REFERENCES interviews (id) ON DELETE CASCADE,
+        type         TEXT NOT NULL,
+        at           TEXT NOT NULL,
+        data         TEXT NOT NULL
+      );
+      CREATE INDEX room_events_interview ON room_events (interview_id, seq);
+    `,
+  },
 ];
 
 type Row = Record<string, string | number | null | bigint | Uint8Array>;
@@ -124,7 +166,7 @@ function toSegment(r: Row): TranscriptSegment {
  * One file, WAL mode (readers never block the writer, crash-safe). Fine for a single backend instance;
  * replace with a network database when running more than one.
  */
-export class SqliteStore implements InterviewStore, TranscriptStore, InboundMessageLog, AiConfigStore, AiRunLog {
+export class SqliteStore implements InterviewStore, TranscriptStore, InboundMessageLog, AiConfigStore, AiRunLog, RoomStore {
   private readonly db: DatabaseSync;
 
   constructor(readonly path: string) {
@@ -267,6 +309,63 @@ export class SqliteStore implements InterviewStore, TranscriptStore, InboundMess
       outputTokens: Number(r.output_tokens),
       ms: Number(r.ms),
     }));
+  }
+
+  // ---- coaching room
+
+  async getSetup(interviewId: string) {
+    const r = this.db.prepare("SELECT data FROM room_setup WHERE interview_id = ?").get(interviewId) as Row | undefined;
+    return r ? (JSON.parse(r.data as string) as RoomSetup) : undefined;
+  }
+  async saveSetup(setup: RoomSetup) {
+    this.db
+      .prepare("INSERT INTO room_setup (interview_id, data) VALUES (?, ?) ON CONFLICT(interview_id) DO UPDATE SET data = excluded.data")
+      .run(setup.interviewId, JSON.stringify(setup));
+  }
+  async saveQuestion(q: RoomQuestion) {
+    this.db.prepare("INSERT INTO room_questions (id, interview_id, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data").run(q.id, q.interviewId, JSON.stringify(q));
+  }
+  async deleteQuestions(interviewId: string, ids: string[]) {
+    const del = this.db.prepare("DELETE FROM room_questions WHERE id = ? AND interview_id = ?");
+    for (const id of ids) del.run(id, interviewId);
+  }
+  async listQuestions(interviewId: string) {
+    // rowid order = creation order (an upsert keeps the row's position)
+    return (this.db.prepare("SELECT data FROM room_questions WHERE interview_id = ? ORDER BY rowid").all(interviewId) as Row[]).map((r) => JSON.parse(r.data as string) as RoomQuestion);
+  }
+  async saveAnswer(a: RoomAnswer) {
+    this.db
+      .prepare("INSERT INTO room_answers (id, interview_id, start_ms, data) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, start_ms = excluded.start_ms")
+      .run(a.id, a.interviewId, a.startMs, JSON.stringify(a));
+  }
+  async listAnswers(interviewId: string) {
+    return (this.db.prepare("SELECT data FROM room_answers WHERE interview_id = ? ORDER BY start_ms").all(interviewId) as Row[]).map((r) => JSON.parse(r.data as string) as RoomAnswer);
+  }
+  async saveScore(sc: RoomScore) {
+    this.db
+      .prepare("INSERT INTO room_scores (answer_id, version, interview_id, data) VALUES (?, ?, ?, ?) ON CONFLICT(answer_id, version) DO UPDATE SET data = excluded.data")
+      .run(sc.answerId, sc.version, sc.interviewId, JSON.stringify(sc));
+  }
+  async listScores(interviewId: string) {
+    return (this.db.prepare("SELECT data FROM room_scores WHERE interview_id = ? ORDER BY rowid").all(interviewId) as Row[]).map((r) => JSON.parse(r.data as string) as RoomScore);
+  }
+  async appendEvent(interviewId: string, type: RoomEventType, data: unknown) {
+    const at = new Date().toISOString();
+    const res = this.db.prepare("INSERT INTO room_events (interview_id, type, at, data) VALUES (?, ?, ?, ?)").run(interviewId, type, at, JSON.stringify(data));
+    return { seq: Number(res.lastInsertRowid), at, type, data } as RoomEvent & { seq: number };
+  }
+  private toEvent(r: Row) {
+    return { seq: Number(r.seq), at: r.at as string, type: r.type as RoomEventType, data: JSON.parse(r.data as string) as unknown };
+  }
+  async eventsAfter(interviewId: string, afterSeq: number, limit: number) {
+    return (this.db.prepare("SELECT * FROM room_events WHERE interview_id = ? AND seq > ? ORDER BY seq LIMIT ?").all(interviewId, afterSeq, limit) as Row[]).map((r) => this.toEvent(r));
+  }
+  async lastEvent(interviewId: string, type: RoomEventType) {
+    const r = this.db.prepare("SELECT * FROM room_events WHERE interview_id = ? AND type = ? ORDER BY seq DESC LIMIT 1").get(interviewId, type) as Row | undefined;
+    return r ? this.toEvent(r) : undefined;
+  }
+  async deleteRoom(interviewId: string) {
+    for (const t of ["room_setup", "room_questions", "room_answers", "room_scores", "room_events"]) this.db.prepare(`DELETE FROM ${t} WHERE interview_id = ?`).run(interviewId);
   }
 
   // ---- operations

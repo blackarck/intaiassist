@@ -18,7 +18,7 @@ export type SegmentHandler = (e: Extract<MeetingEvent, { type: "segment" }>["seg
  */
 export async function handleBotEvent(
   e: MeetingEvent,
-  deps: { store: InterviewStore; transcripts?: TranscriptStore; onSegment?: SegmentHandler },
+  deps: { store: InterviewStore; transcripts?: TranscriptStore; onSegment?: SegmentHandler; onEvent?: (e: MeetingEvent) => void },
 ): Promise<{ ok: boolean; error?: string }> {
   const interviewId = e.type === "segment" ? e.segment.interviewId : e.interviewId;
   const interview = await deps.store.findById(interviewId);
@@ -42,5 +42,6 @@ export async function handleBotEvent(
   let status = STATUS_FOR[e.type];
   if (e.type === "ended" && e.reason === "not_admitted") status = "not_admitted";
   if (status) await deps.store.save({ ...interview, status });
+  deps.onEvent?.(e);
   return { ok: true };
 }

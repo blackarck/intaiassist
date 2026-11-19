@@ -3,6 +3,8 @@ import { envModelFactory } from "./ai/models.js";
 import { buildApp } from "./app.js";
 import { LogBotController, RecallBotController, type BotController } from "./botController.js";
 import { RecallClient } from "./recall.js";
+import { RoomService } from "./room/service.js";
+import { InMemoryRoomStore } from "./room/types.js";
 import { SqliteStore } from "./sqliteStore.js";
 import { InMemoryStore } from "./store.js";
 
@@ -56,8 +58,20 @@ else console.warn("DATABASE_PATH not set: using the in-memory store (state is lo
 const aiStore = sqlite ?? new InMemoryAiStore();
 const ai = { config: aiStore, log: aiStore, models: envModelFactory(process.env) };
 
+// The live coaching room needs the SQLite store (rooms live beside the interviews they belong to).
+const room = new RoomService({
+  rooms: sqlite ?? new InMemoryRoomStore(),
+  transcripts: store,
+  interviews: store,
+  ai,
+  onWarn: (m, e) => console.warn(`[room] ${m}:`, (e as Error)?.message),
+});
+room.start();
+
 const app = buildApp({
   ai,
+  room,
+  onMeetingEvent: (e) => room.onMeetingEvent(e),
   store,
   transcripts: store,
   messageLog: store,
@@ -69,10 +83,10 @@ const app = buildApp({
   requireSenderAuth: process.env.INBOUND_REQUIRE_AUTH !== "false",
   enableDevRoutes: process.env.NODE_ENV !== "production",
   // Transcript text is personal data: it goes to the database, NOT to the logs. LOG_TRANSCRIPT=1 is for local debugging only.
-  onSegment:
-    process.env.LOG_TRANSCRIPT === "1"
-      ? (s) => console.log(`[segment] ${s.role ?? "?"} ${s.speakerName ?? s.speakerId}${s.isFinal ? "" : " (partial)"}: ${s.text}`)
-      : undefined,
+  onSegment: (s) => {
+    room.onSegment(s);
+    if (process.env.LOG_TRANSCRIPT === "1") console.log(`[segment] ${s.role ?? "?"} ${s.speakerName ?? s.speakerId}${s.isFinal ? "" : " (partial)"}: ${s.text}`);
+  },
 });
 
 // As PID 1 in a container, Node only stops on SIGTERM if we handle it. Finish in-flight requests, then close the database.
@@ -80,7 +94,9 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, async () => {
     console.log(`${signal} received, shutting down`);
     try {
+      room.stop();
       await app.close();
+      await room.settle(); // let in-flight scoring finish and be saved before the database closes
       sqlite?.close();
     } finally {
       process.exit(0);

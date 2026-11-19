@@ -5,12 +5,16 @@ import { allEffectiveConfigs, type AiConfigStore, type AiRunLog, type TaskOverri
 import { CATALOG, findModel, type ModelFactory } from "./ai/models.js";
 import { runTask } from "./ai/runner.js";
 import { TASKS, getTask, taskNames } from "./ai/tasks/index.js";
+import { z } from "zod";
 import { aliasAddress, generateAlias } from "./alias.js";
 import { type SegmentHandler } from "./events.js";
+import type { MeetingEvent } from "./meetingSource.js";
 import { parseSendGridInbound } from "./inbound.js";
 import { handleInvite, handlePastedLink, type IntakeDeps } from "./intake.js";
 import type { InviteEmail } from "./invite.js";
 import { handleRecallWebhook, verifyRecallSignature } from "./recallWebhook.js";
+import { openLive, sseFrame } from "./room/live.js";
+import type { RoomService } from "./room/service.js";
 import type { InboundMessageLog, TranscriptStore } from "./store.js";
 
 /** Largest inbound e-mail we accept. Invites are tiny; anything near this is junk or a mail with big attachments. */
@@ -38,6 +42,10 @@ export interface AppConfig extends IntakeDeps {
   transcripts?: TranscriptStore;
   /** Called for every final/partial transcript segment. */
   onSegment?: SegmentHandler;
+  /** Called for bot lifecycle events (joining, admitted, ended). */
+  onMeetingEvent?: (e: MeetingEvent) => void;
+  /** The live coaching room. Without it the room routes answer 501. */
+  room?: RoomService;
   /** AI coaching: settings store, run log and model factory. Without it the /api/admin/ai routes answer 501. */
   ai?: { config: AiConfigStore; log: AiRunLog; models: ModelFactory };
   /** Injectable clock for signature-timestamp checks (tests). */
@@ -181,6 +189,82 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
     return { runs: await ai.log.recent(Number(req.query.limit) || 50) };
   });
 
+  // ---- live coaching room (operator token for now; the web app will use the interviewer's own login)
+  const SetupBody = z.object({
+    roleTitle: z.string().min(1).max(120),
+    roleLevel: z.string().max(60).optional(),
+    jd: z.string().max(20_000),
+    resumeSummary: z.string().max(20_000).optional(),
+    presetQuestions: z.array(z.object({ text: z.string().min(1).max(600), keyPoints: z.array(z.string().max(300)).max(12).optional() })).max(20).default([]),
+  });
+
+  /** Looks up the interview and the room service; sends the error reply itself and returns undefined when either is missing. */
+  const roomFor = async (id: string, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) => {
+    if (!cfg.room) return void reply.code(501).send({ error: "room not configured" });
+    if (!(await cfg.store.findById(id))) return void reply.code(404).send({ error: "not found" });
+    return cfg.room;
+  };
+
+  app.put<{ Params: { id: string }; Body: unknown }>("/api/interviews/:id/setup", async (req, reply) => {
+    const room = await roomFor(req.params.id, reply);
+    if (!room) return;
+    const parsed = SetupBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; ") });
+    return { questions: await room.configure({ interviewId: req.params.id, ...parsed.data }) };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/interviews/:id/room", async (req, reply) => {
+    const room = await roomFor(req.params.id, reply);
+    return room ? room.snapshot(req.params.id) : undefined;
+  });
+
+  app.post<{ Params: { id: string }; Body: { count?: number } }>("/api/interviews/:id/room/opening-questions", async (req, reply) => {
+    const room = await roomFor(req.params.id, reply);
+    if (!room) return;
+    const count = Number.isInteger(req.body?.count) ? Math.min(Math.max(req.body!.count!, 1), 10) : 6;
+    const res = await room.openingQuestions(req.params.id, count);
+    return res.ok ? res : reply.code(res.error.code === "no_setup" ? 409 : 502).send(res);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/interviews/:id/room/assist", async (req, reply) => {
+    const room = await roomFor(req.params.id, reply);
+    if (!room) return;
+    const res = await room.assist(req.params.id);
+    return res.ok ? res : reply.code(res.error.code === "no_transcript" ? 409 : 502).send(res);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/interviews/:id/room/scorecard", async (req, reply) => {
+    const room = await roomFor(req.params.id, reply);
+    if (!room) return;
+    const res = await room.scorecard(req.params.id);
+    return res.ok ? res : reply.code(res.error.code === "nothing_to_score" ? 409 : 502).send(res);
+  });
+
+  // Server-Sent Events. A reconnecting client sends Last-Event-ID (or ?after=) and gets what it missed.
+  app.get<{ Params: { id: string }; Querystring: { after?: string } }>("/api/interviews/:id/live", async (req, reply) => {
+    const room = await roomFor(req.params.id, reply);
+    if (!room) return;
+    const after = Number(req.headers["last-event-id"] ?? req.query.after ?? 0);
+    reply.hijack();
+    const raw = reply.raw;
+    raw.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no" });
+    raw.write("retry: 3000\n\n");
+    let stop: (() => void) | undefined;
+    const heartbeat = setInterval(() => raw.write(": keep-alive\n\n"), 15_000);
+    const end = () => {
+      clearInterval(heartbeat);
+      stop?.();
+    };
+    req.raw.on("close", end);
+    try {
+      stop = await openLive(room, req.params.id, Number.isFinite(after) && after > 0 ? after : 0, (e) => raw.write(sseFrame(e)));
+      if (raw.destroyed) end();
+    } catch {
+      end();
+      raw.end();
+    }
+  });
+
   // Portal paste-link fallback
   app.post<{ Body: { alias: string; link: string; startsAt?: string } }>("/api/intake/link", async (req, reply) => {
     const { alias, link } = req.body ?? {};
@@ -217,7 +301,7 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
         return reply.code(400).send({ error: "invalid json" });
       }
       // 200 for events we do not use, otherwise Recall retries them (up to 60 times for real-time endpoints)
-      const result = await handleRecallWebhook(payload, cfg);
+      const result = await handleRecallWebhook(payload, { ...cfg, onEvent: cfg.onMeetingEvent });
 
       // Operational log: event name and outcome only. Never the payload, which holds transcript text and names.
       const event = typeof (payload as { event?: unknown })?.event === "string" ? (payload as { event: string }).event : "unknown";

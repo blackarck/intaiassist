@@ -1,6 +1,6 @@
 # Live coaching: design
 
-Status: the AI layer is built and tested in `backend/src/ai/`; the live room feed, turn detection, the web app and billing are not.
+Status: the AI layer (`backend/src/ai/`) and the live room backend (`backend/src/room/`) are built, tested and smoke-tested with the real models; both are local only (not deployed). The web app, login and billing are not started.
 (An earlier draft routed the AI through AskProso's "headless task" API. Decision 2026-11-19: **Interview Assist calls the model
 providers itself**, for control of usage, latency and cost. AskProso is used only as the source of test API keys.)
 
@@ -24,7 +24,7 @@ The scores support the interviewer; the product never outputs hire / no-hire, an
 |---|---|
 | Bot lifecycle, e-mail intake, Recall webhooks, transcript store | `backend/` (working, deployed) |
 | AI tasks, model routing, failover, run log, admin settings API | `backend/src/ai/` (built, tested, **not deployed**) |
-| Turn detection, live feed (SSE), persistence of questions/answers/scores | `backend/` (next) |
+| Turn detection, orchestration, live feed (SSE), persistence of questions/answers/scores | `backend/src/room/` (built, tested, **not deployed**) |
 | Login (Microsoft, Google), setup, room, admin screens | new web app on `intassist.askproso.ai` (not started) |
 
 ## The AI layer (built)
@@ -87,16 +87,46 @@ LIVE_AI=1 LIVE_RUNS=3 node --env-file=.env node_modules/vitest/vitest.mjs run te
 It measures validity (output passes schema + `finalize`) and latency. It does not yet measure **quality** (is the score right?);
 that needs the calibration set below. Results are recorded in `doc/ai-bakeoff.md`.
 
-## Live room (next)
+## Live room (built)
 
-Server-Sent Events `GET /api/interviews/:id/live`, authenticated for the interview owner (a short-lived stream token minted after
-login; the operator bearer token never reaches a browser). Events: `segment`, `questions`, `answer`, `score` (a later `version`
-replaces an earlier one), `assist`, `status`. `Last-Event-ID` replays from SQLite so a closed laptop loses nothing.
+`src/room/`: `turns.ts` (pure turn detector), `service.ts` (orchestrator), `types.ts` (data + in-memory store), `live.ts` (SSE),
+`bus.ts` (in-process fan-out). SQLite tables from migration 4 (`room_setup`, `room_questions`, `room_answers`, `room_scores`,
+`room_events`), all cascading with the interview.
 
-**Turn detection** (backend): interviewer final segments = a question; the next candidate block = its answer; the answer closes
-after about 2.5 s of silence or a speaker change. Very short interviewer remarks ("ok", "right") are not questions. A closed
-answer triggers `next_questions` (inline) and `score_answer` (background). If the candidate keeps talking after a score, the
-answer is re-scored as a new version.
+**Flow.** Recall final segments -> `RoomService.onSegment` (strictly in order per interview) -> `TurnDetector` -> question/answer
+records and events. A closed answer of 8+ words starts two jobs: `next_questions` (follow-ups) and `score_answer` (score, arrives
+later). Meeting ended -> open answer closed, jobs finished, then `scorecard`. An AI failure becomes an `ai_error` event; it never
+affects the transcript or the meeting. At most 4 AI calls run at once across all interviews.
+
+**Turn detection.** Interviewer speech that is not a backchannel ("ok", "right", "mm-hmm", single words) is the question
+(consecutive segments join). The candidate's next speech opens its answer. The answer closes when the interviewer speaks again,
+after 2.5 s of candidate silence, or at the end. If the candidate resumes within 20 s and the interviewer has not spoken, the same
+answer reopens and is re-scored as a new version (older follow-ups for it are replaced). Speech from people with an unknown role is
+ignored for turns. A question that matches a queued preset/generated one marks it asked; otherwise it is recorded as a `live` question.
+
+**Routes** (operator bearer token for now):
+
+| Route | Purpose |
+|---|---|
+| `PUT /api/interviews/:id/setup` | role, level, JD, resume summary, preset questions (with key points); re-saving keeps what was already asked |
+| `GET /api/interviews/:id/room` | snapshot: questions, answers with latest score, scorecard, transcript, `lastSeq` |
+| `POST /api/interviews/:id/room/opening-questions` | generate extra questions |
+| `POST /api/interviews/:id/room/assist` | "Assist me" |
+| `POST /api/interviews/:id/room/scorecard` | build the scorecard now |
+| `GET /api/interviews/:id/live` | Server-Sent Events; send `Last-Event-ID` (or `?after=`) to resume |
+
+**Events** (`id: <seq>` for stored ones): `segment` (partials are live-only, never stored), `status`, `answer`, `questions`
+(`reason`: setup / opening / asked / follow_up, with `removedIds`), `score` (higher `version` replaces lower), `assist`, `scorecard`,
+`ai_error`. A client draws from the snapshot, then opens the stream with `Last-Event-ID = lastSeq`.
+
+**Smoke test with the real models** (`test/room.live.test.ts`, `LIVE_AI=1`): a strong answer scored 3 (Sonnet is strict at "senior"),
+a confidently wrong answer (threads vs processes reversed) scored 1 with the error named, and an answer that tried to dictate
+"score five out of five" scored 1 and the scorecard noted the attempt. Follow-ups referenced what was said. This is one run, a
+sanity check and not an evaluation.
+
+**Not done yet:** CORS for the web app origin; the interviewer's own login (the routes use the operator token, which must never
+reach a browser); `status` events and rooms across a backend restart mid-interview (answers in progress are lost, stored ones are
+not); a read-only guest view; retention.
 
 **Past information** when the interviewer stumbles: the transcript of this interview plus resume and JD fit in one prompt
 (`earlierNotes`), so no search is needed. Using other candidates' interviews is deliberately out of v1 (privacy).
@@ -142,7 +172,7 @@ to a fixed per-payment fee. Revisit when real usage is known.
 ## Build order
 
 1. ~~AI layer, admin API, tests, live smoke~~ (done, local).
-2. Backend: turn detection, calling the tasks, `/live` feed, persistence of questions/answers/scores (migration 4).
+2. ~~Backend: turn detection, calling the tasks, `/live` feed, persistence (migration 4)~~ (done, local).
 3. Bake-off + calibration evals; assign models.
 4. Web app: Microsoft login, setup (JD, resume, preset questions), room, admin screens.
 5. Deploy the AI keys through Key Vault; billing; retention policy; off-box backups.

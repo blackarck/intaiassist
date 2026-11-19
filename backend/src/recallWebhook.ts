@@ -146,7 +146,7 @@ export type WebhookResult = { status: "ok"; events: number } | { status: "ignore
  */
 export async function handleRecallWebhook(
   payload: unknown,
-  deps: { store: InterviewStore; transcripts?: TranscriptStore; onSegment?: SegmentHandler },
+  deps: { store: InterviewStore; transcripts?: TranscriptStore; onSegment?: SegmentHandler; onEvent?: (e: MeetingEvent) => void },
 ): Promise<WebhookResult> {
   const bot = isObj(payload) && isObj(payload.data) && isObj(payload.data.bot) ? payload.data.bot : undefined;
   const botId = str(bot?.id);

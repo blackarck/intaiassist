@@ -25,9 +25,13 @@ IP="$(az network public-ip show -g "$RG" -n "${VM_NAME}-ip" --query ipAddress -o
 
 # Caddy asks Let's Encrypt for a certificate as soon as it starts. Failed attempts are rate limited, so do not start before DNS is right.
 if [ "${SKIP_DNS_CHECK:-0}" != "1" ]; then
-  RESOLVED="$(dig +short @8.8.8.8 "$DOMAIN" | tail -1)"
+  # Ask the zone's AUTHORITATIVE server (what Let's Encrypt effectively sees), not one public resolver: a resolver can
+  # serve a stale cached "no such name" for a while after the record was created.
+  ZONE="$(echo "$DOMAIN" | awk -F. '{print $(NF-1)"."$NF}')"
+  NS="$(dig +short NS "$ZONE" | head -1)"
+  RESOLVED="$(dig +short @"${NS:-1.1.1.1}" A "$DOMAIN" | tail -1)"
   if [ "$RESOLVED" != "$IP" ]; then
-    echo "DNS check failed: $DOMAIN resolves to '${RESOLVED:-nothing}', expected $IP."
+    echo "DNS check failed: $DOMAIN resolves to '${RESOLVED:-nothing}' at ${NS:-1.1.1.1}, expected $IP."
     echo "Create the A record first (or SKIP_DNS_CHECK=1 to override)."; exit 1
   fi
 fi

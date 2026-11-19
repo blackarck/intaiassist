@@ -1,0 +1,24 @@
+#cloud-config
+# First-boot setup for the backend VM (Ubuntu 24.04): Docker + Compose, SSH hardening, automatic security updates.
+package_update: true
+package_upgrade: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - unattended-upgrades
+  - python3
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-hardening.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+
+runcmd:
+  - systemctl enable --now docker
+  - usermod -aG docker azureuser
+  - mkdir -p /opt/intassist
+  - chown azureuser:azureuser /opt/intassist
+  - systemctl restart ssh

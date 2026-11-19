@@ -1,0 +1,39 @@
+# Backend + Caddy reverse proxy on one VM.
+# Run from this directory with the env file the deploy script writes:
+#   docker compose --env-file /opt/intassist/.env up -d --build
+#
+# Only Caddy publishes ports. The backend is reachable solely through Caddy on the internal network.
+services:
+  backend:
+    build: ../backend
+    restart: unless-stopped
+    env_file: /opt/intassist/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    expose:
+      - "3000"
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set in /opt/intassist/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates live here; keep this volume
+      - caddy_config:/config
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -155,10 +155,10 @@ describe("SqliteStore specifics", () => {
   it("applies migrations once and is safe to reopen", () => {
     const file = join(tmp(), "db.sqlite");
     const a = new SqliteStore(file);
-    expect(a.schemaVersion).toBe(2);
+    expect(a.schemaVersion).toBe(3);
     a.close();
     const b = new SqliteStore(file);
-    expect(b.schemaVersion).toBe(2);
+    expect(b.schemaVersion).toBe(3);
     b.close();
   });
 

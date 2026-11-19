@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { MeetingPlatform } from "./invite.js";
 import type { TranscriptSegment } from "./meetingSource.js";
+import type { AiConfigStore, AiRun, AiRunLog, TaskOverride } from "./ai/configStore.js";
 import type { InboundMessageLog, Interview, InterviewStatus, InterviewStore, TranscriptStore } from "./store.js";
 
 /**
@@ -57,6 +58,32 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       );
     `,
   },
+  {
+    version: 3,
+    sql: `
+      -- Operator overrides of the AI task settings (model, limits, kill switch). A missing row means "built-in default".
+      CREATE TABLE ai_task_config (
+        task       TEXT PRIMARY KEY,
+        config     TEXT NOT NULL,           -- JSON of the overridden fields only
+        updated_at TEXT NOT NULL
+      );
+      -- One row per AI call. Holds no prompts, transcripts or answers: only what ran, how fast, and the token counts.
+      CREATE TABLE ai_runs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        at            TEXT NOT NULL,
+        task          TEXT NOT NULL,
+        interview_id  TEXT,
+        model         TEXT,
+        ok            INTEGER NOT NULL,
+        outcome       TEXT NOT NULL,
+        attempts      TEXT NOT NULL,        -- JSON [{model, outcome, ms}]
+        input_tokens  INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        ms            INTEGER NOT NULL
+      );
+      CREATE INDEX ai_runs_at ON ai_runs (at);
+    `,
+  },
 ];
 
 type Row = Record<string, string | number | null | bigint | Uint8Array>;
@@ -97,7 +124,7 @@ function toSegment(r: Row): TranscriptSegment {
  * One file, WAL mode (readers never block the writer, crash-safe). Fine for a single backend instance;
  * replace with a network database when running more than one.
  */
-export class SqliteStore implements InterviewStore, TranscriptStore, InboundMessageLog {
+export class SqliteStore implements InterviewStore, TranscriptStore, InboundMessageLog, AiConfigStore, AiRunLog {
   private readonly db: DatabaseSync;
 
   constructor(readonly path: string) {
@@ -203,6 +230,43 @@ export class SqliteStore implements InterviewStore, TranscriptStore, InboundMess
     this.db
       .prepare("INSERT INTO inbound_messages (message_id, received_at) VALUES (?, ?) ON CONFLICT(message_id) DO NOTHING")
       .run(messageId, new Date().toISOString());
+  }
+
+  // ---- AI task configuration and run log
+
+  async getOverrides() {
+    const out: Record<string, TaskOverride> = {};
+    for (const r of this.db.prepare("SELECT task, config FROM ai_task_config").all() as Row[]) out[r.task as string] = JSON.parse(r.config as string) as TaskOverride;
+    return out;
+  }
+  async setOverride(task: string, patch: TaskOverride) {
+    const merged = { ...(await this.getOverrides())[task], ...patch };
+    this.db
+      .prepare("INSERT INTO ai_task_config (task, config, updated_at) VALUES (?, ?, ?) ON CONFLICT(task) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at")
+      .run(task, JSON.stringify(merged), new Date().toISOString());
+  }
+  async clearOverride(task: string) {
+    this.db.prepare("DELETE FROM ai_task_config WHERE task = ?").run(task);
+  }
+  async record(run: AiRun) {
+    this.db
+      .prepare("INSERT INTO ai_runs (at, task, interview_id, model, ok, outcome, attempts, input_tokens, output_tokens, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(run.at, run.task, run.interviewId ?? null, run.model ?? null, run.ok ? 1 : 0, run.outcome, JSON.stringify(run.attempts), run.inputTokens, run.outputTokens, run.ms);
+  }
+  async recent(limit: number) {
+    const rows = this.db.prepare("SELECT * FROM ai_runs ORDER BY id DESC LIMIT ?").all(Math.max(1, Math.min(limit, 500))) as Row[];
+    return rows.map((r): AiRun => ({
+      at: r.at as string,
+      task: r.task as string,
+      interviewId: s(r.interview_id),
+      model: s(r.model),
+      ok: r.ok === 1,
+      outcome: r.outcome as string,
+      attempts: JSON.parse(r.attempts as string) as AiRun["attempts"],
+      inputTokens: Number(r.input_tokens),
+      outputTokens: Number(r.output_tokens),
+      ms: Number(r.ms),
+    }));
   }
 
   // ---- operations

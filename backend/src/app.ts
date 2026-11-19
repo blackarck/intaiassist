@@ -1,6 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
 import multipart from "@fastify/multipart";
 import Fastify, { type FastifyInstance } from "fastify";
+import { allEffectiveConfigs, type AiConfigStore, type AiRunLog, type TaskOverride } from "./ai/configStore.js";
+import { CATALOG, findModel, type ModelFactory } from "./ai/models.js";
+import { runTask } from "./ai/runner.js";
+import { TASKS, getTask, taskNames } from "./ai/tasks/index.js";
 import { aliasAddress, generateAlias } from "./alias.js";
 import { type SegmentHandler } from "./events.js";
 import { parseSendGridInbound } from "./inbound.js";
@@ -34,6 +38,8 @@ export interface AppConfig extends IntakeDeps {
   transcripts?: TranscriptStore;
   /** Called for every final/partial transcript segment. */
   onSegment?: SegmentHandler;
+  /** AI coaching: settings store, run log and model factory. Without it the /api/admin/ai routes answer 501. */
+  ai?: { config: AiConfigStore; log: AiRunLog; models: ModelFactory };
   /** Injectable clock for signature-timestamp checks (tests). */
   nowMs?: () => number;
 }
@@ -112,6 +118,67 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
         .send(segments.map((s) => `[${clock(s.startMs)}] ${s.speakerName ?? s.speakerId} (${s.role ?? "unknown"}): ${s.text}`).join("\n"));
     }
     return { interviewId: i.id, segments };
+  });
+
+  // ---- AI configuration (operator screens). Same bearer token as the rest of /api until real auth exists.
+  const aiOr501 = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }) => (cfg.ai ? cfg.ai : (reply.code(501).send({ error: "ai not configured" }), undefined));
+
+  app.get("/api/admin/ai/config", async (_req, reply) => {
+    const ai = aiOr501(reply);
+    if (!ai) return;
+    return { models: CATALOG, tasks: await allEffectiveConfigs(ai.config), overrides: await ai.config.getOverrides() };
+  });
+
+  app.put<{ Params: { task: string }; Body: Record<string, unknown> }>("/api/admin/ai/config/:task", async (req, reply) => {
+    const ai = aiOr501(reply);
+    if (!ai) return;
+    if (!getTask(req.params.task)) return reply.code(404).send({ error: "unknown task" });
+    const b = req.body ?? {};
+    const patch: TaskOverride = {};
+    const int = (v: unknown, lo: number, hi: number) => (typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined);
+    for (const key of ["primary", "fallback"] as const) {
+      if (b[key] === undefined) continue;
+      if (typeof b[key] !== "string" || !findModel(b[key] as string)) return reply.code(400).send({ error: `${key} must be a model id from the catalog` });
+      patch[key] = b[key] as string;
+    }
+    for (const [key, lo, hi] of [["timeoutMs", 1000, 300_000], ["deadlineMs", 1000, 600_000], ["maxOutputTokens", 16, 64_000]] as const) {
+      if (b[key] === undefined) continue;
+      const v = int(b[key], lo, hi);
+      if (v === undefined) return reply.code(400).send({ error: `${key} must be an integer from ${lo} to ${hi}` });
+      patch[key] = v;
+    }
+    if (b.temperature !== undefined) {
+      if (typeof b.temperature !== "number" || b.temperature < 0 || b.temperature > 2) return reply.code(400).send({ error: "temperature must be 0 to 2" });
+      patch.temperature = b.temperature;
+    }
+    if (b.enabled !== undefined) {
+      if (typeof b.enabled !== "boolean") return reply.code(400).send({ error: "enabled must be true or false" });
+      patch.enabled = b.enabled;
+    }
+    await ai.config.setOverride(req.params.task, patch);
+    return { task: req.params.task, overrides: (await ai.config.getOverrides())[req.params.task] };
+  });
+
+  app.delete<{ Params: { task: string } }>("/api/admin/ai/config/:task", async (req, reply) => {
+    const ai = aiOr501(reply);
+    if (!ai) return;
+    await ai.config.clearOverride(req.params.task);
+    return { ok: true };
+  });
+
+  // The "Test" button: runs a task on its built-in sample input (invented text, no interview data).
+  app.post<{ Params: { task: string } }>("/api/admin/ai/test/:task", async (req, reply) => {
+    const ai = aiOr501(reply);
+    if (!ai) return;
+    if (!getTask(req.params.task)) return reply.code(404).send({ error: "unknown task", tasks: taskNames });
+    const res = await runTask(ai, req.params.task, TASKS[req.params.task as keyof typeof TASKS].sample, { interviewId: "admin-test" });
+    return res;
+  });
+
+  app.get<{ Querystring: { limit?: string } }>("/api/admin/ai/runs", async (req, reply) => {
+    const ai = aiOr501(reply);
+    if (!ai) return;
+    return { runs: await ai.log.recent(Number(req.query.limit) || 50) };
   });
 
   // Portal paste-link fallback

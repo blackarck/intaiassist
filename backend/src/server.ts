@@ -1,3 +1,5 @@
+import { InMemoryAiStore } from "./ai/configStore.js";
+import { envModelFactory } from "./ai/models.js";
 import { buildApp } from "./app.js";
 import { LogBotController, RecallBotController, type BotController } from "./botController.js";
 import { RecallClient } from "./recall.js";
@@ -49,7 +51,13 @@ const store = sqlite ?? new InMemoryStore();
 if (sqlite) console.log(`database: ${sqlite.path} (schema v${sqlite.schemaVersion})`);
 else console.warn("DATABASE_PATH not set: using the in-memory store (state is lost on restart)");
 
+// AI coaching (question suggestions, answer scoring). Provider keys come from the environment; a model is only built
+// when a task is actually routed to it, so a missing key affects only the tasks that use that provider.
+const aiStore = sqlite ?? new InMemoryAiStore();
+const ai = { config: aiStore, log: aiStore, models: envModelFactory(process.env) };
+
 const app = buildApp({
+  ai,
   store,
   transcripts: store,
   messageLog: store,

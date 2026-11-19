@@ -149,6 +149,12 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
         fields[k] = typeof v === "string" ? v : Buffer.isBuffer(v) ? v.toString("utf8") : undefined;
       }
 
+      // One operational line per message: the outcome only. Never sender, subject, recipients or body (names, links).
+      const done = <T extends { status: string; reason?: string }>(result: T): T => {
+        console.log(`[inbound] ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
+        return result;
+      };
+
       const parsed = await parseSendGridInbound(fields);
       // 200 for everything we deliberately skip: a non-2xx makes SendGrid redeliver the same mail again and again.
       if (!parsed) {
@@ -156,16 +162,16 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
         return { status: "ignored", reason: "raw_mime_required" };
       }
       if (cfg.requireSenderAuth !== false && !parsed.senderAuthenticated) {
-        return { status: "ignored", reason: "sender_not_authenticated" };
+        return done({ status: "ignored", reason: "sender_not_authenticated" });
       }
       if (cfg.messageLog && (await cfg.messageLog.hasMessageSeen(parsed.invite.messageId))) {
-        return { status: "ignored", reason: "duplicate_message" };
+        return done({ status: "ignored", reason: "duplicate_message" });
       }
 
       // A provider failure here throws -> HTTP 500 -> SendGrid retries later (the message is not yet marked as seen).
       const result = await handleInvite(parsed.invite, cfg);
       await cfg.messageLog?.markMessageSeen(parsed.invite.messageId);
-      return result;
+      return done(result);
     });
   });
 

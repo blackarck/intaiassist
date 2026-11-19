@@ -221,6 +221,33 @@ describe("POST /webhooks/recall", () => {
     expect(segments[0]).toMatchObject({ interviewId: "i-1", text: "I like Kafka", role: "candidate", isFinal: true });
   });
 
+  it("persists final segments once (webhook retries), and not partials", async () => {
+    const persisted = new InMemoryStore();
+    await persisted.save({ ...interview });
+    const withStore = buildApp({
+      store: persisted,
+      transcripts: persisted,
+      controller: fakeController(),
+      aliasDomain: "bot.test",
+      intakeToken: "test-token",
+      enableDevRoutes: false,
+      recallWebhookSecret: WEBHOOK_SECRET,
+    });
+    const post = (body: unknown) => {
+      const raw = JSON.stringify(body);
+      return withStore.inject({ method: "POST", url: "/webhooks/recall", headers: signed(raw), payload: raw });
+    };
+    const final = transcript("transcript.data", { id: 7, name: "Asha", is_host: false }, ["I", "like", "Kafka"]);
+
+    await post(final);
+    await post(final); // Recall delivered it twice
+    await post(transcript("transcript.partial_data", { id: 7, name: "Asha", is_host: false }, ["And", "also"]));
+
+    const stored = await persisted.listSegments("i-1");
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ text: "I like Kafka", role: "candidate", isFinal: true });
+  });
+
   it("resolves the interview by metadata even before the bot id is stored (no race)", async () => {
     await store.save({ ...interview, recallBotId: undefined });
     await send(status("in_waiting_room"));

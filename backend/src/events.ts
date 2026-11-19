@@ -1,5 +1,5 @@
 import type { MeetingEvent } from "./meetingSource.js";
-import type { InterviewStatus, InterviewStore } from "./store.js";
+import type { InterviewStatus, InterviewStore, TranscriptStore } from "./store.js";
 
 const STATUS_FOR: Record<MeetingEvent["type"], InterviewStatus | undefined> = {
   lobby_waiting: "joining",
@@ -18,7 +18,7 @@ export type SegmentHandler = (e: Extract<MeetingEvent, { type: "segment" }>["seg
  */
 export async function handleBotEvent(
   e: MeetingEvent,
-  deps: { store: InterviewStore; onSegment?: SegmentHandler },
+  deps: { store: InterviewStore; transcripts?: TranscriptStore; onSegment?: SegmentHandler },
 ): Promise<{ ok: boolean; error?: string }> {
   const interviewId = e.type === "segment" ? e.segment.interviewId : e.interviewId;
   const interview = await deps.store.findById(interviewId);
@@ -28,6 +28,8 @@ export async function handleBotEvent(
   if (interview.status === "cancelled") return { ok: true };
 
   if (e.type === "segment") {
+    // Only final utterances are stored; partials are for live display. A storage error propagates (HTTP 500) so Recall retries.
+    if (e.segment.isFinal) await deps.transcripts?.appendSegment(e.segment);
     deps.onSegment?.(e.segment);
     return { ok: true };
   }

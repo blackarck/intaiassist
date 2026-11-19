@@ -4,7 +4,7 @@ A bot joins the interviewer's video call (Teams, Zoom or Google Meet), listens, 
 privately. Meeting access and live transcription come from [Recall.ai](https://docs.recall.ai); this repo is the
 backend that schedules the bot, receives the live transcript, and (next) turns it into coaching.
 
-Docs: [plan](doc/plan.md) · [Recall integration](doc/recall-integration.md) · [end-to-end flow](doc/flow.md) ·
+Docs: [plan](doc/plan.md) · [Recall integration](doc/recall-integration.md) · [data & backups](doc/data.md) · [end-to-end flow](doc/flow.md) ·
 [why not our own Teams bot](doc/bot-join-research.md).
 
 ## How it works
@@ -27,7 +27,8 @@ Logic App ──POST──►  backend /api/intake/meeting-invite
 
 | Path | What | State |
 |---|---|---|
-| `backend/` | TypeScript (Fastify). Invite intake, Recall client, bot scheduling, webhook receiver | **69 tests pass**; not yet run against live Recall |
+| `backend/` | TypeScript (Fastify). Invite intake, Recall client, bot scheduling, webhook receiver, SQLite persistence | **94 tests pass**; not yet run against live Recall |
+| `deploy/` | Docker Compose: backend + Caddy (automatic HTTPS), nightly DB backup | Written, **first deploy pending DNS** |
 | `infra/logic-app/` | Logic App that forwards invite emails from the bot mailbox to the backend | Written, **not deployed** |
 | `infra/azure/` | `provision.sh`: resource group + Key Vault | Used |
 | `teams-app/` | Optional Teams chat app for private coaching messages (chat only) | Manifest packs, **not sideloaded** |
@@ -61,5 +62,5 @@ Tests: `cd backend && npm test` (and `npm run typecheck`).
 
 ## Not built yet
 
-Payment/portal, a database (the store is in memory), coaching (turn detection → scoring → follow-up questions), the
+Payment/portal, a cloud database (SQLite for now, see doc/data.md), coaching (turn detection → scoring → follow-up questions), the
 Teams coaching chat, hosting/deployment, and Entra-based auth on `/api/*` (a shared bearer token is used for now).

@@ -8,9 +8,14 @@ services:
     build: ../backend
     restart: unless-stopped
     env_file: /opt/intassist/.env
+    init: true # reaps zombies and forwards SIGTERM so the app can close the database cleanly
+    stop_grace_period: 20s
     environment:
       NODE_ENV: production
       PORT: "3000"
+      DATABASE_PATH: /data/intassist.db
+    volumes:
+      - backend_data:/data # SQLite database + backups; losing this volume loses all interviews and transcripts
     expose:
       - "3000"
     logging: &logging
@@ -35,5 +40,6 @@ services:
     logging: *logging
 
 volumes:
+  backend_data:
   caddy_data:
   caddy_config:

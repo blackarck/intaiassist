@@ -73,6 +73,10 @@ echo "env written ($(grep -c '=' /opt/intassist/.env) variables, mode $(stat -c 
 cd /opt/intassist/app/deploy
 sudo docker compose --env-file /opt/intassist/.env up -d --build
 sudo docker image prune -f >/dev/null
+
+# nightly database snapshot at 03:00 (idempotent: replaces any previous entry)
+chmod +x /opt/intassist/app/deploy/backup-db.sh
+( crontab -l 2>/dev/null | grep -v backup-db.sh || true; echo '0 3 * * * sudo /opt/intassist/app/deploy/backup-db.sh >> /opt/intassist/backup.log 2>&1' ) | crontab -
 sudo docker compose --env-file /opt/intassist/.env ps
 REMOTE
 

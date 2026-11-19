@@ -1,4 +1,5 @@
 import type { MeetingPlatform } from "./invite.js";
+import type { TranscriptSegment } from "./meetingSource.js";
 
 export type InterviewStatus =
   | "paid" // alias issued, waiting for invite
@@ -30,29 +31,63 @@ export interface Interview {
   recording?: { ok: boolean; detail?: string };
 }
 
+/**
+ * Persistence is split into two small interfaces. Every method is async on purpose, so a network database
+ * (Postgres, Cosmos) can replace SQLite later by adding one class; nothing else in the app changes.
+ */
 export interface InterviewStore {
   findByAlias(alias: string): Promise<Interview | undefined>;
   findById(id: string): Promise<Interview | undefined>;
   findByBotId(botId: string): Promise<Interview | undefined>;
+  /** Insert or update by id. Throws if the alias already belongs to a different interview. */
   save(interview: Interview): Promise<void>;
 }
 
-/** Spike-only store. Replace with Postgres/Cosmos. */
-export class InMemoryStore implements InterviewStore {
+export interface TranscriptStore {
+  /**
+   * Persist a FINAL segment. Idempotent: Recall delivers webhooks at least once, so the same utterance can arrive
+   * twice; (interview, speaker, startMs) identifies it.
+   */
+  appendSegment(segment: TranscriptSegment): Promise<void>;
+  /** All stored segments of an interview, oldest first. */
+  listSegments(interviewId: string): Promise<TranscriptSegment[]>;
+  /** Erase an interview's transcript (retention / data-subject deletion). */
+  deleteSegments(interviewId: string): Promise<void>;
+}
+
+/** Process-memory store for tests and quick local runs. State is lost on restart. */
+export class InMemoryStore implements InterviewStore, TranscriptStore {
   private byId = new Map<string, Interview>();
+  private segments = new Map<string, TranscriptSegment[]>();
 
   async findByAlias(alias: string) {
-    for (const i of this.byId.values()) if (i.alias === alias.toUpperCase()) return i;
+    for (const i of this.byId.values()) if (i.alias === alias.toUpperCase()) return { ...i };
     return undefined;
   }
   async findById(id: string) {
-    return this.byId.get(id);
+    const i = this.byId.get(id);
+    return i ? { ...i } : undefined;
   }
   async findByBotId(botId: string) {
-    for (const i of this.byId.values()) if (i.recallBotId === botId) return i;
+    for (const i of this.byId.values()) if (i.recallBotId === botId) return { ...i };
     return undefined;
   }
   async save(interview: Interview) {
+    for (const other of this.byId.values()) {
+      if (other.id !== interview.id && other.alias === interview.alias) throw new Error(`alias ${interview.alias} already in use`);
+    }
     this.byId.set(interview.id, { ...interview });
+  }
+
+  async appendSegment(s: TranscriptSegment) {
+    const list = this.segments.get(s.interviewId) ?? [];
+    if (!list.some((x) => x.speakerId === s.speakerId && x.startMs === s.startMs)) list.push({ ...s });
+    this.segments.set(s.interviewId, list);
+  }
+  async listSegments(interviewId: string) {
+    return [...(this.segments.get(interviewId) ?? [])].sort((a, b) => a.startMs - b.startMs);
+  }
+  async deleteSegments(interviewId: string) {
+    this.segments.delete(interviewId);
   }
 }

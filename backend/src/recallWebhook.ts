@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { handleBotEvent, type SegmentHandler } from "./events.js";
 import type { MeetingEvent } from "./meetingSource.js";
-import type { Interview, InterviewStore } from "./store.js";
+import type { Interview, InterviewStore, TranscriptStore } from "./store.js";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Signature verification (Recall docs: "Verifying webhooks, websockets and callback requests from Recall.ai")
@@ -146,7 +146,7 @@ export type WebhookResult = { status: "ok"; events: number } | { status: "ignore
  */
 export async function handleRecallWebhook(
   payload: unknown,
-  deps: { store: InterviewStore; onSegment?: SegmentHandler },
+  deps: { store: InterviewStore; transcripts?: TranscriptStore; onSegment?: SegmentHandler },
 ): Promise<WebhookResult> {
   const bot = isObj(payload) && isObj(payload.data) && isObj(payload.data.bot) ? payload.data.bot : undefined;
   const botId = str(bot?.id);

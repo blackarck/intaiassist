@@ -4,6 +4,7 @@ import { type SegmentHandler } from "./events.js";
 import { handleInvite, handlePastedLink, type IntakeDeps } from "./intake.js";
 import type { InviteEmail } from "./invite.js";
 import { handleRecallWebhook, verifyRecallSignature } from "./recallWebhook.js";
+import type { TranscriptStore } from "./store.js";
 
 export interface AppConfig extends IntakeDeps {
   /**
@@ -15,6 +16,8 @@ export interface AppConfig extends IntakeDeps {
   enableDevRoutes: boolean;
   /** Workspace verification secret from the Recall dashboard (whsec_...). Without it the webhook route answers 503. */
   recallWebhookSecret?: string;
+  /** Where final transcript segments are persisted. */
+  transcripts?: TranscriptStore;
   /** Called for every final/partial transcript segment. */
   onSegment?: SegmentHandler;
   /** Injectable clock for signature-timestamp checks (tests). */

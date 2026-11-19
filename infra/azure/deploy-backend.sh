@@ -81,11 +81,16 @@ fi
 rm -rf /opt/intassist/app && mkdir -p /opt/intassist/app
 tar -xzf /tmp/intassist-app.tgz -C /opt/intassist/app && rm /tmp/intassist-app.tgz
 
-# web app: swap the static files in one step (Caddy serves /opt/intassist/web read-only)
-rm -rf /opt/intassist/web.new && mkdir -p /opt/intassist/web.new
+# web app: replace the static files IN PLACE. Caddy bind-mounts /opt/intassist/web; swapping the directory itself would leave the
+# running container looking at the old, deleted one (404 until Caddy restarts). Assets are hashed, so old and new files can coexist
+# for the moment between the two steps; index.html is copied last so it never points at a file that is not there yet.
+mkdir -p /opt/intassist/web && rm -rf /opt/intassist/web.new && mkdir -p /opt/intassist/web.new
 tar -xzf /tmp/intassist-web.tgz -C /opt/intassist/web.new && rm /tmp/intassist-web.tgz
-rm -rf /opt/intassist/web.old; [ -d /opt/intassist/web ] && mv /opt/intassist/web /opt/intassist/web.old
-mv /opt/intassist/web.new /opt/intassist/web; rm -rf /opt/intassist/web.old
+find /opt/intassist/web -mindepth 1 -maxdepth 1 ! -name assets -exec rm -rf {} +
+mkdir -p /opt/intassist/web/assets && cp -a /opt/intassist/web.new/assets/. /opt/intassist/web/assets/
+find /opt/intassist/web/assets -type f -mmin +1440 -delete   # drop bundles older than a day
+( cd /opt/intassist/web.new && for f in *; do [ "$f" = assets ] || [ "$f" = index.html ] || cp -a "$f" /opt/intassist/web/; done; cp -a index.html /opt/intassist/web/ )
+rm -rf /opt/intassist/web.new
 
 # secrets: Key Vault via the VM's managed identity
 TOKEN="$(curl -s -H Metadata:true 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net' \

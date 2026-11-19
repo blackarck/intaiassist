@@ -1,0 +1,47 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.19",
+  "version": "0.1.0",
+  "id": "{{BOT_APP_ID}}",
+  "developer": {
+    "name": "{{DEVELOPER_NAME}}",
+    "websiteUrl": "https://{{PUBLIC_HOST}}",
+    "privacyUrl": "https://{{PUBLIC_HOST}}/privacy",
+    "termsOfUseUrl": "https://{{PUBLIC_HOST}}/terms"
+  },
+  "name": {
+    "short": "Interview Assistant",
+    "full": "Interview Assistant: live interview copilot"
+  },
+  "description": {
+    "short": "Listens to your interview and coaches you privately in chat.",
+    "full": "Interview Assistant joins your Teams interview as a participant, listens to the conversation, and sends private coaching to you in this chat: suggested follow-up questions, answer scoring against the job description, and a scorecard at the end. It never speaks in the meeting."
+  },
+  "icons": { "color": "color.png", "outline": "outline.png" },
+  "accentColor": "#2563EB",
+  "bots": [
+    {
+      "botId": "{{BOT_APP_ID}}",
+      "scopes": ["personal", "groupChat"],
+      "isNotificationOnly": false,
+      "supportsCalling": true,
+      "supportsVideo": false,
+      "supportsFiles": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["{{PUBLIC_HOST}}"],
+  "webApplicationInfo": {
+    "id": "{{BOT_APP_ID}}",
+    "resource": "https://RscPermission"
+  },
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        { "name": "Calls.JoinGroupCalls.Chat", "type": "Application" },
+        { "name": "Calls.AccessMedia.Chat", "type": "Application" },
+        { "name": "OnlineMeetingParticipant.Read.Chat", "type": "Application" }
+      ]
+    }
+  }
+}

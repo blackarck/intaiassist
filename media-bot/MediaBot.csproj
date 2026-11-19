@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MediaBot</RootNamespace>
+  </PropertyGroup>
+
+  <!-- The Real-Time Media Platform native library is x64 + Windows only. Keep other OSes (dev laptops) on AnyCPU so stub mode still runs. -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pulls in Graph.Communications.* and MSAL (and, transitively, the real-time media platform). -->
+    <PackageReference Include="Microsoft.Graph.Communications.Calls.Media" Version="1.2.0.18742" />
+    <!--
+      MUST be a DIRECT reference. Its build targets copy the native media binaries (NativeMedia.dll, RtmPal.dll,
+      skypert.dll, ...) next to the app. NuGet only imports build/ targets of direct references, so as a transitive
+      dependency they were silently left out and startup failed with "Unable to load DLL 'NativeMedia'".
+      Keep the version at least what Calls.Media requires.
+    -->
+    <PackageReference Include="Microsoft.Skype.Bots.Media" Version="1.33.0.258-preview" />
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.53.1" />
+  </ItemGroup>
+
+</Project>

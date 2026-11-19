@@ -1,0 +1,18 @@
+# dependencies and build output
+node_modules/
+dist/
+bin/
+obj/
+publish/
+*.zip
+
+# local-only files (contain short-lived links or machine-specific data)
+local/
+.DS_Store
+.claude/
+
+# secrets, just in case
+.env
+.env.*
+*.pfx
+*.pem

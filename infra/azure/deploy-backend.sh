@@ -126,6 +126,9 @@ CADDY_CHECK="$(sudo docker run --rm -v /opt/intassist/app/deploy/Caddyfile:/etc/
 echo "$CADDY_CHECK" | tail -1 | cut -c1-200
 echo "$CADDY_CHECK" | grep -q "Valid configuration" || { echo "Caddyfile is invalid: nothing was started or changed beyond the files copied"; exit 1; }
 sudo docker compose --env-file /opt/intassist/.env up -d --build
+# `up` leaves a running Caddy alone when only the Caddyfile changed (and a file bind mount can keep the old copy of it), so
+# restart it: this is what makes a changed Content-Security-Policy or site block take effect. Certificates live on a volume.
+sudo docker compose --env-file /opt/intassist/.env restart caddy
 sudo docker image prune -f >/dev/null
 
 # nightly database snapshot at 03:00 (idempotent: replaces any previous entry)

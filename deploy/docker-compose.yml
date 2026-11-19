@@ -33,8 +33,10 @@ services:
       - "443:443/udp" # HTTP/3
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN must be set in /opt/intassist/.env}
+      WEB_DOMAIN: ${WEB_DOMAIN:?WEB_DOMAIN must be set in /opt/intassist/.env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/intassist/web:/srv/web:ro # the built web app, put there by the deploy script
       - caddy_data:/data # certificates live here; keep this volume
       - caddy_config:/config
     logging: *logging

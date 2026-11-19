@@ -35,3 +35,28 @@
 		import proxy
 	}
 }
+
+# The web app: static files built by the deploy script. Unknown paths fall back to index.html (client-side routes).
+{$WEB_DOMAIN} {
+	encode zstd gzip
+	root * /srv/web
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		# Scripts only from this site. connect-src: the API and Microsoft sign-in. frame-src: Microsoft's silent sign-in frame.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://{$DOMAIN} https://login.microsoftonline.com; frame-src https://login.microsoftonline.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+		-Server
+	}
+
+	# Hashed build assets never change under the same name; the pages themselves must always be re-checked.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@pages not path /assets/*
+	header @pages Cache-Control "no-cache"
+
+	try_files {path} /index.html
+	file_server
+}

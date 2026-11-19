@@ -24,6 +24,13 @@ Source: [docs.recall.ai](https://docs.recall.ai). Code: `backend/src/recall.ts`,
    pointing at the same URL.
 4. Set `PUBLIC_BASE_URL` to the same host (no trailing slash).
 
+**Current state (2026-11-19):** workspace "Proso AI", region `us-west-2`. The dashboard webhook is registered
+(`ep_3MJci5EYB18BqGUp1STtEpJcDtE`) for `https://intassistback.askproso.ai/webhooks/recall`, subscribed to
+`bot.in_waiting_room`, `bot.in_call_not_recording`, `bot.in_call_recording`, `bot.recording_permission_allowed`,
+`bot.recording_permission_denied`, `bot.call_ended` and `bot.fatal`. A signed test event was acknowledged by the backend
+(`[recall] bot.in_waiting_room -> ignored (unknown_interview)` in its log). The Recall MCP server (`list_bots`, `get_bot`,
+`get_bot_logs`, `list_webhook_deliveries`, ...) can inspect bots and deliveries.
+
 The backend accepts either `RECALL_API_KEY` or `RECALL_AI_API_KEY`, and either `RECALL_WEBHOOK_SECRET` or `RECALL_VERI_SECRET`.
 
 ## Behaviour to know

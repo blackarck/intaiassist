@@ -31,7 +31,7 @@ All records live at the registrar's DNS for `askproso.ai` (name servers `dns1/dn
 
 | Host | Type | Value | Purpose | Status |
 |---|---|---|---|---|
-| `intassistback` | A | `168.62.166.49` | Backend: Recall webhooks, SendGrid inbound webhook, API, health check | **Done** |
+| `intassistback` | A | `168.62.166.49` | Backend: Recall webhooks, SendGrid inbound webhook, API, health check | **Done and live** (Let's Encrypt certificate issued by Caddy, valid to 2027-02-17, renewed automatically) |
 | `intassist` | A | `168.62.166.49` | Frontend (portal). Nothing serves it yet; see below | Placeholder. **Delete the old record that points to `20.102.63.2`** |
 | `invite` | MX, priority 10 | `mx.sendgrid.net` | Receives invite e-mail (SendGrid Inbound Parse). A dedicated subdomain, so the root domain's mail is untouched | To do ([inbound-email.md](inbound-email.md)) |
 | (3 records) | CNAME | values shown by SendGrid | SendGrid domain authentication (needed to send e-mail, and per SendGrid's API docs the Inbound Parse hostname must be an authenticated domain) | To do |

@@ -5,7 +5,7 @@ import { config } from "./config";
 
 const SCOPES = ["openid", "profile", "email"];
 const msal = config.msClientId
-  ? new PublicClientApplication({ auth: { clientId: config.msClientId, authority: config.msAuthority, redirectUri: window.location.origin }, cache: { cacheLocation: "localStorage" } })
+  ? new PublicClientApplication({ auth: { clientId: config.msClientId, authority: config.msAuthority, redirectUri: `${window.location.origin}/redirect.html` }, cache: { cacheLocation: "localStorage" } })
   : undefined;
 
 interface AuthState {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api";
 import { ErrorNote, Spinner } from "../components/ui";
-import { useLoad } from "../hooks";
+import { useLoad, useMe } from "../hooks";
 
 interface Model { id: string; label: string; provider: string }
 interface TaskCfg { enabled: boolean; primary: string; fallback: string; timeoutMs: number; deadlineMs: number; maxOutputTokens: number }
@@ -18,9 +18,17 @@ const TASK_HELP: Record<string, string> = {
 
 export function AdminPage() {
   const cfg = useLoad<Config>("/api/admin/ai/config");
+  const me = useMe();
   const runs = useLoad<{ runs: Run[] }>("/api/admin/ai/runs?limit=40");
   if (cfg.loading && !cfg.data) return <Spinner />;
-  if (cfg.error) return <ErrorNote>{cfg.error === "forbidden" ? "You do not have access to this page." : cfg.error}</ErrorNote>;
+  if (cfg.error === "forbidden")
+    return (
+      <div className="space-y-2">
+        <ErrorNote>You do not have access to this page.</ErrorNote>
+        {me.data && <p className="text-sm muted">To be made an admin, give the operator your account id: <code className="select-all rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">{me.data.subject}</code></p>}
+      </div>
+    );
+  if (cfg.error) return <ErrorNote>{cfg.error}</ErrorNote>;
   if (!cfg.data) return null;
   return (
     <div className="space-y-8">

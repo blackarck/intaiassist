@@ -46,8 +46,8 @@
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		X-Frame-Options "DENY"
-		# Scripts only from this site. connect-src: the API and Microsoft sign-in. frame-src: Microsoft's silent sign-in frame.
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://{$DOMAIN} https://login.microsoftonline.com; frame-src https://login.microsoftonline.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+		# Scripts only from this site. connect-src: the API, Microsoft sign-in and Microsoft Graph (calendar). frame-src: Microsoft's silent sign-in frame.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://{$DOMAIN} https://login.microsoftonline.com https://graph.microsoft.com; frame-src https://login.microsoftonline.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 		-Server
 	}
 

@@ -5,9 +5,11 @@ import { allEffectiveConfigs, type AiConfigStore, type AiRunLog, type TaskOverri
 import { CATALOG, findModel, type ModelFactory } from "./ai/models.js";
 import { runTask } from "./ai/runner.js";
 import { TASKS, getTask, taskNames } from "./ai/tasks/index.js";
+import cors from "@fastify/cors";
 import { z } from "zod";
+import type { Auth, Principal, TokenVerifier } from "./auth.js";
 import { aliasAddress, generateAlias } from "./alias.js";
-import { type SegmentHandler } from "./events.js";
+import { handleBotEvent, type SegmentHandler } from "./events.js";
 import type { MeetingEvent } from "./meetingSource.js";
 import { parseSendGridInbound } from "./inbound.js";
 import { handleInvite, handlePastedLink, type IntakeDeps } from "./intake.js";
@@ -15,7 +17,7 @@ import type { InviteEmail } from "./invite.js";
 import { handleRecallWebhook, verifyRecallSignature } from "./recallWebhook.js";
 import { openLive, sseFrame } from "./room/live.js";
 import type { RoomService } from "./room/service.js";
-import type { InboundMessageLog, TranscriptStore } from "./store.js";
+import type { InboundMessageLog, Interview, TranscriptStore } from "./store.js";
 
 /** Largest inbound e-mail we accept. Invites are tiny; anything near this is junk or a mail with big attachments. */
 const MAX_INBOUND_BYTES = 12 * 1024 * 1024;
@@ -40,6 +42,17 @@ export interface AppConfig extends IntakeDeps {
   messageLog?: InboundMessageLog;
   /** Where final transcript segments are persisted. */
   transcripts?: TranscriptStore;
+  /** Verifies the ID token a signed-in person sends as the bearer token. Without it only the operator token works. */
+  verifier?: TokenVerifier;
+  /** Login subjects (see Principal.subject) allowed into /api/admin. The operator token is always allowed. */
+  adminSubjects?: string[];
+  /** Browser origins allowed to call the API (the web app). */
+  allowedOrigins?: string[];
+  /**
+   * Local development only: accept `Authorization: Dev <email>` as a signed-in user. Ignored (and refused at startup in
+   * server.ts) when NODE_ENV=production.
+   */
+  devAuth?: boolean;
   /** Called for every final/partial transcript segment. */
   onSegment?: SegmentHandler;
   /** Called for bot lifecycle events (joining, admitted, ended). */
@@ -50,6 +63,13 @@ export interface AppConfig extends IntakeDeps {
   ai?: { config: AiConfigStore; log: AiRunLog; models: ModelFactory };
   /** Injectable clock for signature-timestamp checks (tests). */
   nowMs?: () => number;
+}
+
+declare module "fastify" {
+  interface FastifyRequest {
+    /** Set by the access hook for every /api request. */
+    auth?: Auth;
+  }
 }
 
 function tokenOk(header: string | undefined, expected: string): boolean {
@@ -63,9 +83,49 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
 
   app.get("/health", async () => ({ ok: true }));
 
+  app.register(cors, { origin: cfg.allowedOrigins ?? false, methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], allowedHeaders: ["authorization", "content-type", "last-event-id"], maxAge: 600 });
+
+  /** Who is calling: the operator token, a verified login, or (development only) a dev user. */
+  async function authenticate(header: string | undefined): Promise<Auth | undefined> {
+    if (tokenOk(header, cfg.intakeToken)) return { kind: "operator" };
+    const bearer = (header ?? "").replace(/^Bearer\s+/i, "");
+    if (cfg.devAuth) {
+      const m = /^Dev\s+(\S+@\S+)$/i.exec(header ?? "");
+      if (m) return { kind: "user", principal: { provider: "microsoft", subject: `dev:local:${m[1]!.toLowerCase()}`, email: m[1]!.toLowerCase(), name: m[1]!.split("@")[0] } };
+    }
+    if (cfg.verifier && bearer) {
+      const principal = await cfg.verifier.verify(bearer);
+      if (principal) return { kind: "user", principal };
+    }
+    return undefined;
+  }
+
+  const isAdmin = (a: Auth) => a.kind === "operator" || (cfg.adminSubjects ?? []).includes(a.principal.subject);
+
+  /**
+   * One place decides who may call what under /api:
+   *  /api/me/*                      a signed-in person
+   *  /api/interviews/:id[/...]      the operator, or the person who owns that interview (anyone else gets 404, not 403)
+   *  /api/admin/*                   the operator or an admin login
+   *  everything else under /api     the operator only (intake, creating interviews for others, dev routes)
+   */
   app.addHook("onRequest", async (req, reply) => {
-    if (req.url.startsWith("/api/") && !tokenOk(req.headers.authorization, cfg.intakeToken)) {
-      return reply.code(401).send({ error: "unauthorized" });
+    if (req.method === "OPTIONS" || !req.url.startsWith("/api/")) return;
+    const auth = await authenticate(req.headers.authorization);
+    if (!auth) return reply.code(401).send({ error: "unauthorized" });
+    req.auth = auth;
+    const route = req.routeOptions?.url ?? "";
+    if (route.startsWith("/api/me")) {
+      if (auth.kind !== "user") return reply.code(403).send({ error: "sign in as a person to use this" });
+    } else if (route.startsWith("/api/admin/")) {
+      if (!isAdmin(auth)) return reply.code(403).send({ error: "forbidden" });
+    } else if (route.startsWith("/api/interviews/:id")) {
+      if (auth.kind === "user") {
+        const i = await cfg.store.findById((req.params as { id: string }).id);
+        if (!i || i.ownerSubject !== auth.principal.subject) return reply.code(404).send({ error: "not found" });
+      }
+    } else if (auth.kind !== "operator") {
+      return reply.code(403).send({ error: "forbidden" });
     }
   });
 
@@ -100,18 +160,49 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
   });
 
   // Read an interview's state and transcript (operator / future portal). Protected by the same bearer token as the rest of /api.
+  const publicInterview = (i: Interview) => ({
+    id: i.id,
+    alias: i.alias,
+    address: aliasAddress(i.alias, cfg.aliasDomain),
+    status: i.status,
+    platform: i.platform,
+    startsAt: i.startsAt,
+    joinMode: i.joinMode,
+    recording: i.recording,
+    createdAt: i.createdAt,
+  });
+
+  // ---- the signed-in person's own interviews
+  app.get("/api/me", async (req) => {
+    const p = (req.auth as { kind: "user"; principal: Principal }).principal;
+    return { email: p.email, name: p.name, provider: p.provider, subject: p.subject, isAdmin: isAdmin(req.auth!) };
+  });
+
+  app.get("/api/me/interviews", async (req) => {
+    const p = (req.auth as { kind: "user"; principal: Principal }).principal;
+    return { interviews: (await cfg.store.listByOwner(p.subject)).map(publicInterview) };
+  });
+
+  // Payment is not enforced yet (credits/Stripe come with billing). Capped so a script cannot mint aliases without limit.
+  app.post("/api/me/interviews", async (req, reply) => {
+    const p = (req.auth as { kind: "user"; principal: Principal }).principal;
+    if ((await cfg.store.listByOwner(p.subject)).length >= 200) return reply.code(429).send({ error: "interview limit reached" });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const interview = { id: crypto.randomUUID(), alias: generateAlias(), ownerEmail: p.email, ownerSubject: p.subject, status: "paid" as const };
+      try {
+        await cfg.store.save(interview);
+      } catch {
+        continue;
+      }
+      return publicInterview((await cfg.store.findById(interview.id))!);
+    }
+    return reply.code(500).send({ error: "could not allocate an alias" });
+  });
+
   app.get<{ Params: { id: string } }>("/api/interviews/:id", async (req, reply) => {
     const i = await cfg.store.findById(req.params.id);
     if (!i) return reply.code(404).send({ error: "not found" });
-    return {
-      id: i.id,
-      alias: i.alias,
-      status: i.status,
-      platform: i.platform,
-      startsAt: i.startsAt,
-      joinMode: i.joinMode,
-      recording: i.recording,
-    };
+    return publicInterview(i);
   });
 
   app.get<{ Params: { id: string }; Querystring: { format?: string } }>("/api/interviews/:id/transcript", async (req, reply) => {
@@ -213,6 +304,13 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
     return { questions: await room.configure({ interviewId: req.params.id, ...parsed.data }) };
   });
 
+  app.get<{ Params: { id: string } }>("/api/interviews/:id/setup", async (req, reply) => {
+    const room = await roomFor(req.params.id, reply);
+    if (!room) return;
+    const { interviewId: _id, ...setup } = (await room.rooms.getSetup(req.params.id)) ?? { interviewId: "" };
+    return { setup: "roleTitle" in setup ? setup : null };
+  });
+
   app.get<{ Params: { id: string } }>("/api/interviews/:id/room", async (req, reply) => {
     const room = await roomFor(req.params.id, reply);
     return room ? room.snapshot(req.params.id) : undefined;
@@ -247,7 +345,10 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
     const after = Number(req.headers["last-event-id"] ?? req.query.after ?? 0);
     reply.hijack();
     const raw = reply.raw;
-    raw.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no" });
+    // hijack() bypasses Fastify's response hooks, so the CORS plugin cannot add its headers: add them here, for allowed origins only.
+    const origin = req.headers.origin;
+    const cors = origin && (cfg.allowedOrigins ?? []).includes(origin) ? { "access-control-allow-origin": origin, vary: "Origin" } : {};
+    raw.writeHead(200, { ...cors, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no" });
     raw.write("retry: 3000\n\n");
     let stop: (() => void) | undefined;
     const heartbeat = setInterval(() => raw.write(": keep-alive\n\n"), 15_000);
@@ -359,6 +460,23 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
   });
 
   if (cfg.enableDevRoutes) {
+    // Play a meeting without Recall: feed transcript segments and lifecycle events through the same path the webhook uses.
+    app.post<{ Params: { id: string }; Body: { role?: string; text?: string; startMs?: number; speakerName?: string; final?: boolean } }>("/api/dev/interviews/:id/segments", async (req, reply) => {
+      const b = req.body ?? {};
+      if (typeof b.text !== "string" || !["interviewer", "candidate", "unknown"].includes(b.role ?? "")) return reply.code(400).send({ error: "role and text required" });
+      const startMs = typeof b.startMs === "number" ? b.startMs : Date.now() % 10_000_000;
+      return handleBotEvent(
+        { type: "segment", segment: { interviewId: req.params.id, speakerId: b.role === "interviewer" ? "1" : "2", speakerName: b.speakerName ?? b.role, role: b.role as "interviewer" | "candidate" | "unknown", text: b.text, isFinal: b.final !== false, startMs, endMs: startMs + 3000 } },
+        { store: cfg.store, transcripts: cfg.transcripts, onSegment: cfg.onSegment, onEvent: cfg.onMeetingEvent },
+      );
+    });
+    app.post<{ Params: { id: string }; Body: { type?: string; reason?: string } }>("/api/dev/interviews/:id/events", async (req, reply) => {
+      const id = req.params.id;
+      const e = req.body?.type === "lobby_waiting" ? { type: "lobby_waiting" as const, interviewId: id } : req.body?.type === "admitted" ? { type: "admitted" as const, interviewId: id } : req.body?.type === "ended" ? { type: "ended" as const, interviewId: id, reason: "meeting_ended" as const } : undefined;
+      if (!e) return reply.code(400).send({ error: "type must be lobby_waiting, admitted or ended" });
+      return handleBotEvent(e, { store: cfg.store, transcripts: cfg.transcripts, onSegment: cfg.onSegment, onEvent: cfg.onMeetingEvent });
+    });
+
     // Seed a "paid" interview without the portal/payment flow.
     app.post<{ Body: { alias: string; ownerEmail: string } }>("/api/dev/interviews", async (req, reply) => {
       const { alias, ownerEmail } = req.body ?? {};

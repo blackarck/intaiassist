@@ -16,6 +16,14 @@ export interface Interview {
   alias: string;
   /** Interviewer's e-mail. Used to tag the interviewer's speech (Recall reports participant e-mail when available). */
   ownerEmail: string;
+  /**
+   * Who owns the interview, as "<provider>:<tenant-or-pool>:<account id>" from the verified login. Access is decided by this,
+   * NOT by e-mail: in a multi-tenant Microsoft app an administrator of another tenant can mint a user with any e-mail address.
+   * Absent for interviews created by an operator (only operators can open those).
+   */
+  ownerSubject?: string;
+  /** Set by the store when first saved. */
+  createdAt?: string;
   status: InterviewStatus;
   joinUrl?: string;
   platform?: MeetingPlatform;
@@ -39,6 +47,8 @@ export interface InterviewStore {
   findByAlias(alias: string): Promise<Interview | undefined>;
   findById(id: string): Promise<Interview | undefined>;
   findByBotId(botId: string): Promise<Interview | undefined>;
+  /** Interviews owned by a login subject, newest first. */
+  listByOwner(subject: string): Promise<Interview[]>;
   /** Insert or update by id. Throws if the alias already belongs to a different interview. */
   save(interview: Interview): Promise<void>;
 }
@@ -83,11 +93,15 @@ export class InMemoryStore implements InterviewStore, TranscriptStore, InboundMe
     for (const i of this.byId.values()) if (i.recallBotId === botId) return { ...i };
     return undefined;
   }
+  async listByOwner(subject: string) {
+    return [...this.byId.values()].filter((i) => i.ownerSubject === subject).sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? "")).map((i) => ({ ...i }));
+  }
   async save(interview: Interview) {
     for (const other of this.byId.values()) {
       if (other.id !== interview.id && other.alias === interview.alias) throw new Error(`alias ${interview.alias} already in use`);
     }
-    this.byId.set(interview.id, { ...interview });
+    const createdAt = this.byId.get(interview.id)?.createdAt ?? new Date().toISOString();
+    this.byId.set(interview.id, { ...interview, createdAt });
   }
 
   async appendSegment(s: TranscriptSegment) {

@@ -1,6 +1,6 @@
 # Live coaching: design
 
-Status: the AI layer (`backend/src/ai/`) and the live room backend (`backend/src/room/`) are built, tested and smoke-tested with the real models; both are local only (not deployed). The web app, login and billing are not started.
+Status: the AI layer (`backend/src/ai/`), the live room backend (`backend/src/room/`) and the web app (`web/`) are built and tested, and were exercised together locally with the real models (browser, simulated meeting). None of it is deployed. Microsoft login is not registered, Google login and billing are not built.
 (An earlier draft routed the AI through AskProso's "headless task" API. Decision 2026-11-19: **Interview Assist calls the model
 providers itself**, for control of usage, latency and cost. AskProso is used only as the source of test API keys.)
 
@@ -25,7 +25,7 @@ The scores support the interviewer; the product never outputs hire / no-hire, an
 | Bot lifecycle, e-mail intake, Recall webhooks, transcript store | `backend/` (working, deployed) |
 | AI tasks, model routing, failover, run log, admin settings API | `backend/src/ai/` (built, tested, **not deployed**) |
 | Turn detection, orchestration, live feed (SSE), persistence of questions/answers/scores | `backend/src/room/` (built, tested, **not deployed**) |
-| Login (Microsoft, Google), setup, room, admin screens | new web app on `intassist.askproso.ai` (not started) |
+| Login, setup, room, admin screens | `web/` (built, tested locally; **not deployed**; Microsoft login not registered yet) |
 
 ## The AI layer (built)
 
@@ -138,11 +138,25 @@ not); a read-only guest view; retention.
 3. **Injection**: answers that try to set their own score or reveal the prompt must not move the score.
 4. **Noisy transcripts**: realistic mis-hearings ("segments of facebook") must yield `confidence: low` and a note.
 
-## Login
+## Login and access (built; Entra app not registered yet)
 
-Microsoft (Entra) and Google, with our own app registrations for testing. Not registered yet: creating them is a change in your
-tenant and Google project, so it is a deliberate step when the web app starts. Plan: Microsoft first; the backend verifies the ID
-token (`jose`, JWKS) and maps the account e-mail to the interviewer (`ownerEmail`), which is also how Recall tags the interviewer.
+The web app signs in with MSAL and sends the Microsoft **ID token** to the backend, which verifies it with Microsoft's published
+keys (`src/auth.ts`, audience = our client id, issuer shape + tenant check). A Google verifier exists too (needs a Google client id
+and a button).
+
+**Access is decided by the account's tenant + id (`microsoft:<tenant>:<oid>`), never by e-mail.** In a multi-tenant Microsoft app an
+administrator of another tenant can create a user with any e-mail address, so an e-mail match would let them open someone else's
+interviews. Interviews store `ownerSubject`; `ownerEmail` is only used to recognise the interviewer's voice in the meeting.
+
+| Caller | May |
+|---|---|
+| a signed-in person | `/api/me`, create and list their own interviews, everything under `/api/interviews/:id/...` for interviews they own (anyone else gets 404, not 403) |
+| an admin login (`ADMIN_SUBJECTS`) | also `/api/admin/*` (AI settings) |
+| the operator token (`INTAKE_TOKEN`) | everything, including intake and creating interviews for others; scripts only, never in a browser |
+
+Backend env: `MS_CLIENT_ID`, `GOOGLE_CLIENT_ID` (each provider is on only when set), `ADMIN_SUBJECTS` (comma-separated),
+`ALLOWED_ORIGINS` (comma-separated, the web app's origin for CORS). `DEV_AUTH=1` (local only) accepts `Authorization: Dev <email>`;
+the server refuses to start with it under `NODE_ENV=production`.
 
 ## Billing (suggestion; to finalise when mature)
 
@@ -174,5 +188,5 @@ to a fixed per-payment fee. Revisit when real usage is known.
 1. ~~AI layer, admin API, tests, live smoke~~ (done, local).
 2. ~~Backend: turn detection, calling the tasks, `/live` feed, persistence (migration 4)~~ (done, local).
 3. Bake-off + calibration evals; assign models.
-4. Web app: Microsoft login, setup (JD, resume, preset questions), room, admin screens.
+4. ~~Web app: login, setup, room, admin screens~~ (built, local). Still to do: register the Entra app, Google button, resume upload.
 5. Deploy the AI keys through Key Vault; billing; retention policy; off-box backups.

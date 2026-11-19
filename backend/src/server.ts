@@ -1,6 +1,7 @@
 import { InMemoryAiStore } from "./ai/configStore.js";
 import { envModelFactory } from "./ai/models.js";
 import { buildApp } from "./app.js";
+import { anyOf, googleVerifier, microsoftVerifier, type TokenVerifier } from "./auth.js";
 import { LogBotController, RecallBotController, type BotController } from "./botController.js";
 import { RecallClient } from "./recall.js";
 import { RoomService } from "./room/service.js";
@@ -68,7 +69,23 @@ const room = new RoomService({
 });
 room.start();
 
+// Sign-in: the web app sends the user's Microsoft or Google ID token as the bearer token. Each provider is on only when its
+// client id is set. The operator token (INTAKE_TOKEN) keeps working for scripts and administration.
+const verifiers: TokenVerifier[] = [];
+if (process.env.MS_CLIENT_ID) verifiers.push(microsoftVerifier({ clientId: process.env.MS_CLIENT_ID }));
+if (process.env.GOOGLE_CLIENT_ID) verifiers.push(googleVerifier({ clientId: process.env.GOOGLE_CLIENT_ID }));
+const list = (v: string | undefined) => (v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+if (process.env.DEV_AUTH === "1" && process.env.NODE_ENV === "production") {
+  console.error("DEV_AUTH=1 is not allowed with NODE_ENV=production");
+  process.exit(1);
+}
+if (verifiers.length === 0 && process.env.DEV_AUTH !== "1") console.warn("MS_CLIENT_ID / GOOGLE_CLIENT_ID not set: people cannot sign in (operator token only)");
+
 const app = buildApp({
+  verifier: verifiers.length ? anyOf(...verifiers) : undefined,
+  adminSubjects: list(process.env.ADMIN_SUBJECTS),
+  allowedOrigins: list(process.env.ALLOWED_ORIGINS),
+  devAuth: process.env.DEV_AUTH === "1",
   ai,
   room,
   onMeetingEvent: (e) => room.onMeetingEvent(e),

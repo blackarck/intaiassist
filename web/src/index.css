@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+:root { color-scheme: light dark; }
+body { @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+::selection { @apply bg-indigo-200 dark:bg-indigo-800; }
+
+@utility card { @apply rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900; }
+@utility btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-50; }
+@utility btn-primary { @apply btn bg-indigo-600 text-white hover:bg-indigo-500; }
+@utility btn-ghost { @apply btn border border-zinc-300 bg-transparent hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800; }
+@utility input { @apply w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-zinc-700 dark:bg-zinc-900; }
+@utility label { @apply mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400; }
+@utility muted { @apply text-zinc-500 dark:text-zinc-400; }

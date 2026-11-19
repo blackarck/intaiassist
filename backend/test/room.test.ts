@@ -220,15 +220,17 @@ describe("room routes", () => {
   const H = { authorization: "Bearer api-token" };
   it("validates and saves setup, serves the snapshot, streams over a real connection, and refuses without a token", async () => {
     const t = await setup();
-    const app = buildApp({ store: t.interviews, transcripts: t.interviews, controller: fakeController(), aliasDomain: "x.test", intakeToken: "api-token", enableDevRoutes: false, room: t.room });
+    const app = buildApp({ store: t.interviews, transcripts: t.interviews, controller: fakeController(), aliasDomain: "x.test", intakeToken: "api-token", enableDevRoutes: false, room: t.room, allowedOrigins: ["https://app.test"] });
     const call = (method: "GET" | "PUT" | "POST", url: string, payload?: unknown, headers: Record<string, string> = H) => app.inject({ method, url, headers, payload: payload as never });
 
     expect((await call("GET", "/api/interviews/i-1/room", undefined, {})).statusCode).toBe(401);
     expect((await call("GET", "/api/interviews/nope/room")).statusCode).toBe(404);
+    expect((await call("GET", "/api/interviews/i-1/setup")).json()).toEqual({ setup: null }); // nothing saved yet
     expect((await call("PUT", "/api/interviews/i-1/setup", { roleTitle: "" })).statusCode).toBe(400);
     const ok = await call("PUT", "/api/interviews/i-1/setup", { roleTitle: "Backend", jd: "Node", presetQuestions: [{ text: "Explain mutexes" }] });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().questions).toHaveLength(1);
+    expect((await call("GET", "/api/interviews/i-1/setup")).json().setup).toMatchObject({ roleTitle: "Backend", jd: "Node", presetQuestions: [{ text: "Explain mutexes" }] });
     const snap = (await call("GET", "/api/interviews/i-1/room")).json();
     expect(snap.setup).toMatchObject({ roleTitle: "Backend", presetCount: 1 });
     expect(snap.lastSeq).toBeGreaterThan(0);
@@ -246,6 +248,14 @@ describe("room routes", () => {
       expect(text).toMatch(/id: \d+\nevent: questions\ndata: \{"at":"[^"]+","data":\{"reason":"setup"/);
       await reader.cancel();
       expect((await fetch(`http://127.0.0.1:${port}/api/interviews/i-1/live`)).status).toBe(401);
+
+      // a browser on the web app's origin must be allowed to read the stream; other origins must not be
+      const allowed = await fetch(`http://127.0.0.1:${port}/api/interviews/i-1/live`, { headers: { ...H, origin: "https://app.test" } });
+      expect(allowed.headers.get("access-control-allow-origin")).toBe("https://app.test");
+      await allowed.body!.cancel();
+      const other = await fetch(`http://127.0.0.1:${port}/api/interviews/i-1/live`, { headers: { ...H, origin: "https://evil.test" } });
+      expect(other.headers.get("access-control-allow-origin")).toBeNull();
+      await other.body!.cancel();
     } finally {
       await app.close();
     }

@@ -126,6 +126,13 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX room_events_interview ON room_events (interview_id, seq);
     `,
   },
+  {
+    version: 5,
+    sql: `
+      ALTER TABLE interviews ADD COLUMN owner_subject TEXT;
+      CREATE INDEX interviews_owner_subject ON interviews (owner_subject, created_at);
+    `,
+  },
 ];
 
 type Row = Record<string, string | number | null | bigint | Uint8Array>;
@@ -136,6 +143,8 @@ function toInterview(r: Row): Interview {
     id: r.id as string,
     alias: r.alias as string,
     ownerEmail: r.owner_email as string,
+    ownerSubject: s(r.owner_subject),
+    createdAt: s(r.created_at),
     status: r.status as InterviewStatus,
     joinUrl: s(r.join_url),
     platform: s(r.platform) as MeetingPlatform | undefined,
@@ -204,6 +213,9 @@ export class SqliteStore implements InterviewStore, TranscriptStore, InboundMess
     const r = this.db.prepare("SELECT * FROM interviews WHERE alias = ?").get(alias.toUpperCase()) as Row | undefined;
     return r ? toInterview(r) : undefined;
   }
+  async listByOwner(subject: string) {
+    return (this.db.prepare("SELECT * FROM interviews WHERE owner_subject = ? ORDER BY created_at DESC, rowid DESC").all(subject) as Row[]).map(toInterview);
+  }
   async findByBotId(botId: string) {
     const r = this.db.prepare("SELECT * FROM interviews WHERE recall_bot_id = ?").get(botId) as Row | undefined;
     return r ? toInterview(r) : undefined;
@@ -214,14 +226,14 @@ export class SqliteStore implements InterviewStore, TranscriptStore, InboundMess
     this.db
       .prepare(
         `INSERT INTO interviews (id, alias, owner_email, status, join_url, platform, ical_uid, starts_at, recall_bot_id, join_mode,
-                                 teams_conversation_id, recording_ok, recording_detail, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 teams_conversation_id, recording_ok, recording_detail, owner_subject, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            alias = excluded.alias, owner_email = excluded.owner_email, status = excluded.status, join_url = excluded.join_url,
            platform = excluded.platform, ical_uid = excluded.ical_uid, starts_at = excluded.starts_at,
            recall_bot_id = excluded.recall_bot_id, join_mode = excluded.join_mode,
            teams_conversation_id = excluded.teams_conversation_id, recording_ok = excluded.recording_ok,
-           recording_detail = excluded.recording_detail, updated_at = excluded.updated_at`,
+           recording_detail = excluded.recording_detail, owner_subject = excluded.owner_subject, updated_at = excluded.updated_at`,
       )
       .run(
         i.id,
@@ -237,6 +249,7 @@ export class SqliteStore implements InterviewStore, TranscriptStore, InboundMess
         i.teamsConversationId ?? null,
         i.recording ? (i.recording.ok ? 1 : 0) : null,
         i.recording?.detail ?? null,
+        i.ownerSubject ?? null,
         now,
         now,
       );

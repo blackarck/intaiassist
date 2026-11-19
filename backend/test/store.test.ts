@@ -45,9 +45,25 @@ function contract(name: string, make: () => InterviewStore & TranscriptStore & I
         joinMode: "scheduled",
         teamsConversationId: "19:abc",
         recording: { ok: false, detail: "zoom_local_recording_denied" },
+        ownerSubject: "microsoft:tid-1:oid-1",
       };
       await s.save(full);
-      expect(await s.findById("i-1")).toEqual(full);
+      expect(await s.findById("i-1")).toEqual({ ...full, createdAt: expect.any(String) });
+    });
+
+    it("lists a login's interviews newest first, keeps the owner and creation time across updates, and isolates owners", async () => {
+      const s = make();
+      await s.save({ ...base, id: "a", alias: "AAAAAAAAAA", ownerSubject: "microsoft:t:1" });
+      await new Promise((r) => setTimeout(r, 5));
+      await s.save({ ...base, id: "b", alias: "BBBBBBBBBB", ownerSubject: "microsoft:t:1" });
+      await s.save({ ...base, id: "c", alias: "CCCCCCCCCC", ownerSubject: "microsoft:t:2" });
+      await s.save({ ...base, id: "d", alias: "DDDDDDDDDD" }); // operator-created: no owner
+      const first = (await s.findById("a"))!;
+      await s.save({ ...first, status: "scheduled" }); // a status update must not lose the owner
+      expect((await s.listByOwner("microsoft:t:1")).map((i) => i.id)).toEqual(["b", "a"]);
+      expect((await s.findById("a"))).toMatchObject({ ownerSubject: "microsoft:t:1", createdAt: first.createdAt, status: "scheduled" });
+      expect((await s.listByOwner("microsoft:t:2")).map((i) => i.id)).toEqual(["c"]);
+      expect(await s.listByOwner("microsoft:t:9")).toEqual([]);
     });
 
     it("finds by alias (case-insensitive) and by bot id", async () => {
@@ -155,10 +171,10 @@ describe("SqliteStore specifics", () => {
   it("applies migrations once and is safe to reopen", () => {
     const file = join(tmp(), "db.sqlite");
     const a = new SqliteStore(file);
-    expect(a.schemaVersion).toBe(4);
+    expect(a.schemaVersion).toBe(5);
     a.close();
     const b = new SqliteStore(file);
-    expect(b.schemaVersion).toBe(4);
+    expect(b.schemaVersion).toBe(5);
     b.close();
   });
 

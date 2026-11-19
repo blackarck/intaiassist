@@ -60,6 +60,24 @@ So:
   `v=spf1 include:spf.efwd.registrar-servers.com ~all`.
 
 After saving, tell me and I will check both `invite.askproso.ai` and the root domain's MX records.
+
+**What actually happened when this was done (2026-11-19).** At Namecheap the `invite` MX record can only be added by switching *Mail Settings* from
+*Email Forwarding* to **Custom MX**. Doing so **removed the root domain's forwarding records**: the five `eforward*` MX records and the SPF TXT record
+`v=spf1 include:spf.efwd.registrar-servers.com ~all` (verified with `dig` against Namecheap's name servers). Left intact: both Google site-verification TXT
+records, DMARC, the SendGrid DKIM CNAMEs, and our A records. If root-domain forwarding (for example `hello@askproso.ai`) is needed, add these back **in the same
+Custom MX list**, next to `invite`:
+
+| Host | Type | Value | Priority |
+|---|---|---|---|
+| `@` | MX | `eforward1.registrar-servers.com` | 10 |
+| `@` | MX | `eforward2.registrar-servers.com` | 10 |
+| `@` | MX | `eforward3.registrar-servers.com` | 10 |
+| `@` | MX | `eforward4.registrar-servers.com` | 15 |
+| `@` | MX | `eforward5.registrar-servers.com` | 20 |
+
+and, in *Host Records*, a TXT record: Host `@`, Value `v=spf1 include:spf.efwd.registrar-servers.com ~all`. Whether Namecheap kept the forwarding *aliases* themselves
+after the switch is not verified; test by mailing an existing forwarding address. Sending through SendGrid is unaffected (its DKIM CNAMEs and DMARC are intact).
+
 (New records usually take about 30 minutes.)
 
 ### 3. SendGrid: create the Inbound Parse host

@@ -28,6 +28,11 @@ async, so a network database drops in without touching callers. To move to Postg
 
 A network database is also what allows running more than one backend instance; with SQLite there must be exactly one.
 
+## Reading data
+
+`GET /api/interviews/:id` (status, platform, start, join mode, recording result) and `GET /api/interviews/:id/transcript` (JSON, or `?format=text` for a
+readable `[HH:MM:SS] Name (role): text` list). Both need the API bearer token and do not expose the meeting link, bot id or owner e-mail.
+
 ## Backups
 
 - `deploy/backup-db.sh` (cron, 03:00 on the VM, installed by `deploy-backend.sh`) runs `dist/backup.js` in the container:

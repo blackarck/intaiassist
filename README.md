@@ -27,7 +27,7 @@ SendGrid Inbound Parse ──POST──►  backend /inbound/sendgrid/<secret>
 
 | Path | What | State |
 |---|---|---|
-| `backend/` | TypeScript (Fastify). Inbound invite e-mail, Recall client, bot scheduling, webhook receiver, SQLite persistence | **124 tests pass**; not yet run against live Recall or SendGrid |
+| `backend/` | TypeScript (Fastify). Inbound invite e-mail, Recall client, bot scheduling, webhook receiver, SQLite persistence | **151 tests pass**; **first live end-to-end test passed 2026-11-19** |
 | `deploy/` | Docker Compose: backend + Caddy (automatic HTTPS), nightly DB backup | Written, **first deploy pending DNS** |
 | `infra/sendgrid/` | Script to create the SendGrid Inbound Parse host | Written, **not run** |
 | `infra/azure/` | `provision.sh`: resource group + Key Vault | Used |
@@ -59,6 +59,11 @@ Recall can only deliver webhooks to a public HTTPS URL, so a real end-to-end tes
 (see [doc/recall-integration.md](doc/recall-integration.md)).
 
 Tests: `cd backend && npm test` (and `npm run typecheck`).
+
+## Verified live (2026-11-19)
+
+Invite e-mail to `iv-<alias>@invite.askproso.ai` -> SendGrid Inbound Parse -> backend -> Recall bot created -> bot joined a Teams meeting ->
+live speaker-tagged transcript stored in SQLite (read it with `GET /api/interviews/:id/transcript?format=text`).
 
 ## Not built yet
 

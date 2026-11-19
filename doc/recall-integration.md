@@ -62,3 +62,11 @@ with Caddy for TLS) works too if you prefer to own the machine. For a first test
 - The exact `leave_call` and delete-scheduled-bot endpoints are written from Recall's docs index; confirm against the
   API reference on the first live run.
 - Real payloads have not been captured yet; the mapping follows the documented schemas and is defensive about missing fields.
+
+## Observed in the first live test (2026-11-19, Teams)
+
+- The bot appears as **"Interview Assistant"**, joined the Teams meeting through the lobby, and Recall delivered `bot.in_waiting_room`, `bot.in_call_recording` and `bot.in_call_not_recording`.
+  Status events can arrive **out of order** (`in_call_recording` before `in_call_not_recording`); both map to "admitted", so this is harmless.
+- Teams sends no recording-permission events (those are Zoom-only), so `interviews.recording` stays empty on Teams.
+- The speaker was tagged **interviewer** through the host flag (the organizer), with the display name from Teams. Partial utterances arrive repeatedly; only finals are stored.
+- Transcript text must not appear in logs: it is stored in SQLite and read with `GET /api/interviews/:id/transcript` (bearer token). `LOG_TRANSCRIPT=1` prints it for local debugging only.

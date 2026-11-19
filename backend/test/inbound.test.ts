@@ -41,6 +41,16 @@ describe("parseSendGridInbound", () => {
     expect(p.startsAt).toBe("2026-11-20T10:00:00Z");
   });
 
+  it("reads the start time of an Outlook invite that has a time-zone block BEFORE the event (regression: placeholder DTSTART lines)", async () => {
+    const parsed = await parseSendGridInbound(sendgridFields(fixtureEmail("outlook-invite-ist"), []));
+    const p = parseInvite(parsed!.invite, ALIAS_DOMAIN);
+    expect(p.startsAt).toBe("2026-11-20T10:00:00Z"); // 15:30 India Standard Time
+    expect(p.startIssue).toBeUndefined();
+    expect(p.icalUid).toBe("040000008200E00074C5B7101A82E00800000000IST1");
+    expect(p.method).toBe("request");
+    expect(p.meeting).toEqual({ url: "https://teams.microsoft.com/meet/442518337057043?p=LRX8m2NJcnaYmS13bV", platform: "teams" });
+  });
+
   it("finds the alias in the ENVELOPE when it is not in To/Cc (BCC, forwarded copy)", async () => {
     const parsed = await parseSendGridInbound(sendgridFields(fixtureEmail("google-invite"), ["iv-k7m2qx9wpb@invite.askproso.ai"]));
     const p = parseInvite(parsed!.invite, ALIAS_DOMAIN);

@@ -102,6 +102,15 @@ for sending, messages could loop between its CNAME and MX records. Ours is a dif
 2. From your own Outlook or Google Calendar, create a meeting with a Teams/Meet/Zoom link and add `address` plus a second person.
 3. The backend answers `scheduled`, and a bot appears in Recall for that meeting (the Recall MCP tools or dashboard show it).
 
+## Start times and time zones
+
+The bot joins one minute before the meeting start, read from the invite's calendar part. Supported: UTC (`...Z`), local time with an IANA zone
+(`TZID=Europe/London`), and local time with a **Windows zone name** (`TZID=India Standard Time`, what Outlook and Exchange send; mapped with
+the Unicode CLDR table in `src/windowsZones.ts`), with daylight saving handled. A zone defined only inside the invite is used when it has no daylight-saving rule.
+If the start cannot be resolved with confidence (unknown zone name, floating time, all-day event) **no time is guessed**: the bot is created for an immediate join and the log says
+`[inbound] scheduled (mode=ad_hoc, start not understood: <reason>)`. An early bot waits in the lobby, which costs bot time, so those reasons are worth fixing when they appear.
+The calendar parser reads the start only from inside the event: Outlook puts a time-zone block with placeholder `DTSTART:16010101T000000` lines before it.
+
 ## Security
 
 - **The secret in the URL is the only authentication** on that endpoint, because SendGrid does not sign Inbound Parse requests

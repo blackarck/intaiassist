@@ -60,8 +60,11 @@ const app = buildApp({
   inboundToken: process.env.INBOUND_TOKEN,
   requireSenderAuth: process.env.INBOUND_REQUIRE_AUTH !== "false",
   enableDevRoutes: process.env.NODE_ENV !== "production",
-  onSegment: (s) =>
-    console.log(`[segment] ${s.role ?? "?"} ${s.speakerName ?? s.speakerId}${s.isFinal ? "" : " (partial)"}: ${s.text}`),
+  // Transcript text is personal data: it goes to the database, NOT to the logs. LOG_TRANSCRIPT=1 is for local debugging only.
+  onSegment:
+    process.env.LOG_TRANSCRIPT === "1"
+      ? (s) => console.log(`[segment] ${s.role ?? "?"} ${s.speakerName ?? s.speakerId}${s.isFinal ? "" : " (partial)"}: ${s.text}`)
+      : undefined,
 });
 
 // As PID 1 in a container, Node only stops on SIGTERM if we handle it. Finish in-flight requests, then close the database.

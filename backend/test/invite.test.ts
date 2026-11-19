@@ -83,10 +83,10 @@ describe("parseIcs", () => {
     });
   });
 
-  it("does not guess a start time for TZID-based DTSTART", () => {
+  it("converts a Windows-zone local start time (what Outlook sends) to UTC", () => {
     const ics = "BEGIN:VEVENT\nUID:u1\nDTSTART;TZID=India Standard Time:20261120T153000\nEND:VEVENT";
-    expect(parseIcs(ics).startsAt).toBeUndefined();
-    expect(parseIcs(ics).uid).toBe("u1");
+    expect(parseIcs(ics)).toMatchObject({ uid: "u1", startsAt: "2026-11-20T10:00:00Z" });
+    expect(parseIcs(ics).startIssue).toBeUndefined();
   });
 });
 

@@ -1,3 +1,5 @@
+import { parseUtcOffset, resolveStart } from "./icsTime.js";
+
 /**
  * Parses a meeting-invite email (decoded from SendGrid Inbound Parse, see inbound.ts) into the data the orchestrator needs: the meeting
  * link (Teams, Zoom or Google Meet), which interview alias it was sent to, and (from the ICS attachment, when present)
@@ -40,8 +42,10 @@ export interface ParsedInvite {
   method: InviteMethod;
   /** ICS UID, stable across updates/reschedules */
   icalUid?: string;
-  /** ISO string, only when ICS DTSTART was UTC */
+  /** UTC start time (`YYYY-MM-DDTHH:MM:SSZ`), when the invite's start could be resolved with confidence */
   startsAt?: string;
+  /** Why startsAt is missing (e.g. `unknown_timezone:Foo`, `floating_time`); absent when there is no calendar data at all */
+  startIssue?: string;
   subject: string;
   from: string;
 }
@@ -140,26 +144,73 @@ interface IcsInfo {
   method?: string;
   uid?: string;
   startsAt?: string;
+  startIssue?: string;
 }
 
 function unfold(ics: string): string[] {
   return ics.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
 }
 
+/** Zones defined inside the invite (VTIMEZONE) that have no daylight-saving rule: TZID -> fixed offset in minutes. */
+function fixedZoneOffsets(lines: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  let tzid: string | undefined;
+  let hasDaylight = false;
+  let standard: number | undefined;
+  let inZone = false;
+  for (const line of lines) {
+    const upper = line.toUpperCase();
+    if (upper === "BEGIN:VTIMEZONE") {
+      inZone = true;
+      tzid = undefined;
+      hasDaylight = false;
+      standard = undefined;
+    } else if (upper === "END:VTIMEZONE") {
+      if (inZone && tzid && !hasDaylight && standard !== undefined) out.set(tzid, standard);
+      inZone = false;
+    } else if (inZone) {
+      if (upper.startsWith("TZID:")) tzid = line.slice(5).trim().replace(/^"|"$/g, "");
+      else if (upper === "BEGIN:DAYLIGHT") hasDaylight = true;
+      else if (upper.startsWith("TZOFFSETTO:") && standard === undefined) standard = parseUtcOffset(line.slice(11));
+    }
+  }
+  return out;
+}
+
 export function parseIcs(ics: string): IcsInfo {
   const out: IcsInfo = {};
-  for (const line of unfold(ics)) {
+  const lines = unfold(ics);
+  const fixed = fixedZoneOffsets(lines);
+  // Outlook puts a VTIMEZONE block (with its own placeholder DTSTART:16010101T000000 lines) BEFORE the event, so the
+  // event's UID and start must be read only from inside BEGIN:VEVENT, and only from the first event of a series.
+  let inEvent = false;
+  let eventDone = false;
+  for (const line of lines) {
+    const upper = line.toUpperCase();
+    if (upper === "BEGIN:VEVENT") {
+      inEvent = !eventDone;
+      continue;
+    }
+    if (upper === "END:VEVENT") {
+      if (inEvent) eventDone = true;
+      inEvent = false;
+      continue;
+    }
     const idx = line.indexOf(":");
     if (idx < 0) continue;
     const key = line.slice(0, idx);
     const value = line.slice(idx + 1).trim();
-    const name = key.split(";")[0]?.toUpperCase();
-    if (name === "METHOD") out.method = value.toUpperCase();
+    const [rawName, ...params] = key.split(";");
+    const name = rawName?.toUpperCase();
+    if (name === "METHOD" && !inEvent) out.method = value.toUpperCase();
+    else if (!inEvent) continue;
     else if (name === "UID" && !out.uid) out.uid = value;
-    else if (name === "DTSTART" && !out.startsAt) {
-      // Only trust UTC form; TZID-based times need a tz database mapping (Windows tz names).
-      const m = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
-      if (m) out.startsAt = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`;
+    else if (name === "DTSTART" && !out.startsAt && !out.startIssue) {
+      const tzParam = params.find((p) => p.toUpperCase().startsWith("TZID="));
+      const tzid = tzParam ? tzParam.slice(5).trim().replace(/^"|"$/g, "") : undefined;
+      const result = resolveStart(value, tzid, tzid ? fixed.get(tzid) : undefined);
+      if (result.iso) out.startsAt = result.iso;
+      else out.startIssue = result.issue;
     }
   }
   return out;
@@ -189,6 +240,7 @@ export function parseInvite(email: InviteEmail, aliasDomain: string): ParsedInvi
     method: isCancel ? "cancel" : "request",
     icalUid: ics.uid,
     startsAt: ics.startsAt,
+    startIssue: ics.startsAt ? undefined : ics.startIssue,
     subject: email.subject,
     from: email.from,
   };

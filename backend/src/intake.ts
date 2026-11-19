@@ -12,6 +12,8 @@ export type IntakeResult =
       /** ISO time the bot was told to join; absent when it joins immediately */
       joinAt?: string;
       senderMismatch: boolean;
+      /** Set when the invite had no start time we could resolve, so the bot was created for an immediate join */
+      startNote?: string;
     }
   | { status: "cancelled"; interviewId: string };
 
@@ -63,7 +65,14 @@ export async function handleInvite(email: InviteEmail, deps: IntakeDeps): Promis
   await deps.store.save({ ...updated, recallBotId: plan.botId, joinMode: plan.mode });
 
   const senderMismatch = !parsed.from.toLowerCase().includes(interview.ownerEmail.toLowerCase());
-  return { status: "scheduled", interviewId: interview.id, mode: plan.mode, joinAt: plan.joinAt, senderMismatch };
+  return {
+    status: "scheduled",
+    interviewId: interview.id,
+    mode: plan.mode,
+    joinAt: plan.joinAt,
+    senderMismatch,
+    startNote: updated.startsAt ? undefined : parsed.startIssue,
+  };
 }
 
 /** Portal "paste your meeting link" fallback: same pipeline, no email. */

@@ -1,0 +1,41 @@
+From: Recruiter <recruiter@acme.com>
+To: Candidate <candidate@gmail.com>, Interview Assistant <iv-k7m2qx9wpb@invite.askproso.ai>
+Subject: Interview: Platform Engineer
+Message-ID: <outlook-ist-1@acme.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-ist"
+
+--alt-ist
+Content-Type: text/plain; charset="utf-8"
+
+Join: https://teams.microsoft.com/meet/442518337057043?p=LRX8m2NJcnaYmS13bV
+
+--alt-ist
+Content-Type: text/calendar; charset="utf-8"; method=REQUEST
+
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:Microsoft Exchange Server 2010
+VERSION:2.0
+BEGIN:VTIMEZONE
+TZID:India Standard Time
+BEGIN:STANDARD
+DTSTART:16010101T000000
+TZOFFSETFROM:+0530
+TZOFFSETTO:+0530
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:16010101T000000
+TZOFFSETFROM:+0530
+TZOFFSETTO:+0530
+END:DAYLIGHT
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:040000008200E00074C5B7101A82E00800000000IST1
+DTSTART;TZID=India Standard Time:20261120T153000
+DTEND;TZID=India Standard Time:20261120T163000
+SUMMARY:Interview: Platform Engineer
+END:VEVENT
+END:VCALENDAR
+
+--alt-ist--

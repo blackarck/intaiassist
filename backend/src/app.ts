@@ -85,6 +85,35 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
     return reply.code(500).send({ error: "could not allocate an alias" });
   });
 
+  // Read an interview's state and transcript (operator / future portal). Protected by the same bearer token as the rest of /api.
+  app.get<{ Params: { id: string } }>("/api/interviews/:id", async (req, reply) => {
+    const i = await cfg.store.findById(req.params.id);
+    if (!i) return reply.code(404).send({ error: "not found" });
+    return {
+      id: i.id,
+      alias: i.alias,
+      status: i.status,
+      platform: i.platform,
+      startsAt: i.startsAt,
+      joinMode: i.joinMode,
+      recording: i.recording,
+    };
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { format?: string } }>("/api/interviews/:id/transcript", async (req, reply) => {
+    if (!cfg.transcripts) return reply.code(501).send({ error: "transcript storage not configured" });
+    const i = await cfg.store.findById(req.params.id);
+    if (!i) return reply.code(404).send({ error: "not found" });
+    const segments = await cfg.transcripts.listSegments(i.id);
+    if (req.query.format === "text") {
+      const clock = (ms: number) => new Date(ms).toISOString().slice(11, 19); // HH:MM:SS from the start of the recording
+      return reply
+        .type("text/plain; charset=utf-8")
+        .send(segments.map((s) => `[${clock(s.startMs)}] ${s.speakerName ?? s.speakerId} (${s.role ?? "unknown"}): ${s.text}`).join("\n"));
+    }
+    return { interviewId: i.id, segments };
+  });
+
   // Portal paste-link fallback
   app.post<{ Body: { alias: string; link: string; startsAt?: string } }>("/api/intake/link", async (req, reply) => {
     const { alias, link } = req.body ?? {};
@@ -150,8 +179,11 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
       }
 
       // One operational line per message: the outcome only. Never sender, subject, recipients or body (names, links).
-      const done = <T extends { status: string; reason?: string }>(result: T): T => {
-        console.log(`[inbound] ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
+      const done = <T extends { status: string; reason?: string; mode?: string; startNote?: string }>(result: T): T => {
+        const detail = [result.reason, result.mode && `mode=${result.mode}`, result.startNote && `start not understood: ${result.startNote}`]
+          .filter(Boolean)
+          .join(", ");
+        console.log(`[inbound] ${result.status}${detail ? ` (${detail})` : ""}`);
         return result;
       };
 

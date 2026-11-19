@@ -74,7 +74,8 @@ sudo cloud-init status --wait >/dev/null 2>&1 || true
 
 # snapshot the database BEFORE the new code (and any schema upgrade) touches it; the previous deploy's script does it
 if [ -x /opt/intassist/app/deploy/backup-db.sh ] && sudo docker ps --format '{{.Names}}' | grep -q backend; then
-  sudo /opt/intassist/app/deploy/backup-db.sh && echo "database snapshot taken before deploy"
+  # </dev/null: this script itself is being read from stdin, and a child that reads stdin would swallow the rest of it
+  sudo /opt/intassist/app/deploy/backup-db.sh </dev/null && echo "database snapshot taken before deploy"
 fi
 
 rm -rf /opt/intassist/app && mkdir -p /opt/intassist/app
@@ -115,8 +116,10 @@ echo "env written ($(grep -c '=' /opt/intassist/.env) variables, mode $(stat -c 
 
 cd /opt/intassist/app/deploy
 # A broken Caddyfile would take the API's HTTPS down with it, so check it (with this deploy's real values) before touching anything.
-( set -a; . /opt/intassist/.env; set +a
-  sudo docker run --rm -v /opt/intassist/app/deploy/Caddyfile:/etc/caddy/Caddyfile:ro -e DOMAIN -e WEB_DOMAIN caddy:2 caddy validate --config /etc/caddy/Caddyfile 2>&1 | tail -1 )
+# (values passed explicitly: sudo would not hand the shell's variables to docker)
+CADDY_CHECK="$(sudo docker run --rm -v /opt/intassist/app/deploy/Caddyfile:/etc/caddy/Caddyfile:ro -e DOMAIN="$DOMAIN" -e WEB_DOMAIN="$WEB_DOMAIN" caddy:2 caddy validate --config /etc/caddy/Caddyfile 2>&1 </dev/null || true)"
+echo "$CADDY_CHECK" | tail -1 | cut -c1-200
+echo "$CADDY_CHECK" | grep -q "Valid configuration" || { echo "Caddyfile is invalid: nothing was started or changed beyond the files copied"; exit 1; }
 sudo docker compose --env-file /opt/intassist/.env up -d --build
 sudo docker image prune -f >/dev/null
 

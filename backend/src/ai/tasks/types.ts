@@ -42,12 +42,15 @@ export function requireQuotes(quotes: string[], source: string, what: string) {
   if (bad !== undefined) throw new FinalizeError(`${what} must be copied exactly from the text provided; this one is not in it: "${bad.slice(0, 80)}"`);
 }
 
-/** Near-duplicate test for questions (word-set overlap). */
+/**
+ * Near-duplicate test for questions: the Dice coefficient of their word sets. Overlap measured against the SMALLER set would call a
+ * short pointed follow-up ("what did you do yourself?") a repeat of a long question that merely contains those words.
+ */
 export function sameQuestion(a: string, b: string): boolean {
-  const wa = new Set(norm(a).split(" "));
-  const wb = new Set(norm(b).split(" "));
+  const wa = new Set(norm(a).split(" ").filter(Boolean));
+  const wb = new Set(norm(b).split(" ").filter(Boolean));
   if (wa.size === 0 || wb.size === 0) return false;
   let both = 0;
   for (const w of wa) if (wb.has(w)) both++;
-  return both / Math.min(wa.size, wb.size) >= 0.8;
+  return (2 * both) / (wa.size + wb.size) >= 0.75;
 }

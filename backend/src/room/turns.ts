@@ -103,6 +103,20 @@ export class TurnDetector {
     return this.close("end", now);
   }
 
+  /**
+   * The interviewer has said nothing for `ms` after the candidate finished an answer: they may be busy writing, or stuck.
+   * Returns that answer's id once (so the caller can offer help without being asked), then stays quiet until the next answer.
+   */
+  stalled(now: number, ms: number): string | undefined {
+    const a = this.answer;
+    if (!a || a.open || a.closedAt === undefined || this.interviewerSince || this.nudged.has(`${a.id}:${a.version}`)) return undefined;
+    if (now - a.closedAt < ms) return undefined;
+    this.nudged.add(`${a.id}:${a.version}`);
+    return a.id;
+  }
+
+  private nudged = new Set<string>();
+
   get hasOpenAnswer(): boolean {
     return this.answer?.open === true;
   }

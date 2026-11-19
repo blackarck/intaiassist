@@ -133,7 +133,12 @@ export async function runTask(deps: RunnerDeps, taskName: string, rawInput: unkn
       } catch (e) {
         const rejected = (e as Error)?.name === "FinalizeRejected";
         const kind: Failure = rejected ? "invalid_output" : classify(e);
-        attempts.push({ model: modelId, outcome: kind, ms: now() - t0 });
+        // The model ran out of output tokens mid-answer: the same call would be cut off again, so go straight to the fallback.
+        const truncated = (e as { finishReason?: string })?.finishReason === "length";
+        if (truncated) retried = true;
+        // For a rejected answer keep the RULE that failed, cut before any quoted text (which would be interview content).
+        const detail = rejected ? (e as Error).message.split(': "')[0]!.slice(0, 140) : undefined;
+        attempts.push({ model: modelId, outcome: truncated ? "truncated" : kind, ms: now() - t0, ...(detail ? { detail } : {}) });
         lastFailure = kind;
         lastMessage = rejected ? (e as Error).message : kind === "client_error" ? "the model rejected the request" : kind;
         if (kind === "client_error") return fail("client_error", `${modelId}: ${lastMessage}`);

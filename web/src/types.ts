@@ -22,10 +22,19 @@ export interface Question {
   probes: string[];
   answerId?: string;
   followKind?: "probe" | "clarify" | "deepen" | "move_on";
+  /** "score": derived from problems found in the answer (better grounded than the quick "fast" ones). */
+  source?: "fast" | "score";
+  aboutQuote?: string;
   status: "queued" | "asked" | "skipped";
 }
 
+export interface Problem { quote: string; issue: string; correction: string; severity: "minor" | "major"; counterQuestion: string }
+
 export interface ScoreOutput {
+  /** Written assessment: what was right and what was wrong. */
+  verdict: string;
+  experience: { signal: "first_hand" | "unclear" | "generic"; evidence: string; probe: string };
+  problems: Problem[];
   score: number;
   dimensions: { technicalCorrectness: number; depth: number; clarity: number; relevance: number };
   strengths: string[];
@@ -49,7 +58,7 @@ export interface Answer {
 
 export interface Segment { speakerId: string; speakerName?: string; role: "interviewer" | "candidate" | "unknown"; text: string; startMs: number; endMs?: number }
 
-export interface AssistItem { suggestion: string; kind: "question" | "reminder" | "clarify"; evidence: string[]; at: string }
+export interface AssistItem { suggestion: string; kind: "question" | "reminder" | "clarify"; evidence: string[]; at: string; /** Offered without being asked. */ auto?: boolean }
 
 export interface Scorecard {
   summary: string;

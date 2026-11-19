@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEvent, emptyRoom, fromSnapshot } from "./room";
+import { applyEvent, coachView, emptyRoom, fromSnapshot } from "./room";
 import { createSseParser } from "./sse";
 import type { RoomEvent, Snapshot } from "./types";
 
@@ -23,7 +23,7 @@ const ev = (type: string, data: unknown, seq?: number): RoomEvent => ({ type, da
 const snap: Snapshot = {
   lastSeq: 4,
   questions: [{ id: "q1", kind: "preset", text: "Explain mutexes", keyPoints: [], probes: [], status: "queued" }],
-  answers: [{ id: "a1", questionText: "q", text: "t", startMs: 100, endMs: 200, state: "closed", version: 1, score: { answerId: "a1", version: 1, model: "m", at: "t", output: { score: 3, dimensions: { technicalCorrectness: 3, depth: 3, clarity: 3, relevance: 3 }, strengths: [], gaps: [], evidenceQuotes: [], confidence: "high", note: "" } } }],
+  answers: [{ id: "a1", questionText: "q", text: "t", startMs: 100, endMs: 200, state: "closed", version: 1, score: { answerId: "a1", version: 1, model: "m", at: "t", output: { verdict: "ok", experience: { signal: "first_hand", evidence: "", probe: "" }, problems: [], score: 3, dimensions: { technicalCorrectness: 3, depth: 3, clarity: 3, relevance: 3 }, strengths: [], gaps: [], evidenceQuotes: [], confidence: "high", note: "" } } }],
   scorecard: null,
   transcript: [{ speakerId: "1", role: "interviewer", text: "Hi", startMs: 0 }],
 };
@@ -69,5 +69,32 @@ describe("room reducer", () => {
     s = applyEvent(s, ev("status", { status: "ended" }, 13));
     expect(s.status).toBe("ended");
     expect(applyEvent(s, ev("something_new", {}, 14)).lastSeq).toBe(14); // unknown events are tolerated
+  });
+});
+
+describe("coachView (what the live coach shows)", () => {
+  const answer = (over = {}) => ({ id: "a1", questionText: "Explain mutexes", text: "A mutex is a lock around shared state that only one thread holds at a time", startMs: 1, endMs: 2, state: "closed" as const, version: 1, ...over });
+  const score = (at = "2026-11-19T10:00:00Z") => snap.answers[0]!.score && { ...snap.answers[0]!.score!, answerId: "a1", at };
+  const base = { ...emptyRoom, loaded: true };
+
+  it("walks through listening, assessing and ready by itself as events arrive", () => {
+    expect(coachView(base)).toEqual({ phase: "idle" });
+    let s = { ...base, answers: [answer({ state: "open" as const })] };
+    expect(coachView(s)).toMatchObject({ phase: "listening" });
+    s = { ...s, answers: [answer()] };
+    expect(coachView(s)).toMatchObject({ phase: "assessing" });
+    expect(coachView({ ...s, answers: [answer({ text: "Yes I do" })] })).toMatchObject({ phase: "short" });
+    s = { ...s, scores: { a1: score()! } };
+    expect(coachView(s)).toMatchObject({ phase: "ready" });
+  });
+
+  it("offers only the queued follow-ups for the LATEST answer, in order, and an automatic suggestion made after the score", () => {
+    const q = (id: string, answerId: string, status: "queued" | "asked" = "queued") => ({ id, kind: "follow_up" as const, text: id, keyPoints: [], probes: [], answerId, status });
+    const s = { ...base, answers: [answer()], scores: { a1: score("2026-11-19T10:00:00Z")! }, questions: [q("old", "a0"), q("first", "a1"), q("second", "a1"), q("gone", "a1", "asked")], assists: [{ suggestion: "Ask about deadlocks", kind: "question" as const, evidence: [], at: "2026-11-19T10:00:15Z", auto: true }] };
+    const v = coachView(s);
+    expect(v.phase === "ready" && v.ask.map((x) => x.id)).toEqual(["first", "second"]);
+    expect(v.phase === "ready" && v.suggestion?.suggestion).toBe("Ask about deadlocks");
+    const older = coachView({ ...s, assists: [{ ...s.assists[0]!, at: "2026-11-19T09:59:00Z" }] });
+    expect(older.phase === "ready" && older.suggestion).toBeUndefined(); // a suggestion from before this answer is stale
   });
 });

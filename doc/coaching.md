@@ -103,6 +103,18 @@ after 2.5 s of candidate silence, or at the end. If the candidate resumes within
 answer reopens and is re-scored as a new version (older follow-ups for it are replaced). Speech from people with an unknown role is
 ignored for turns. A question that matches a queued preset/generated one marks it asked; otherwise it is recorded as a `live` question.
 
+**The coach takes charge (nobody presses anything).** The interviewer is busy, so the room drives itself:
+- When an answer ends, the **Coach panel** (pinned above everything) shows a written verdict, the score, and **Ask next**: pointed
+  counter-questions, each tied to the candidate's own words. Under it, the **problems**: exact quote, what is wrong, what a correct
+  answer says, major or minor.
+- It also judges whether the answer **sounds like work the candidate really did** (first-hand / unclear / textbook), comparing with
+  the resume, and adds a **"Check they did the work"** question that asks for specifics: what exactly did *you* do, which number
+  moved, what went wrong first.
+- If the candidate has finished and the interviewer says nothing for 10 s, the coach offers a **suggestion on its own** (a failed
+  automatic suggestion stays silent; only a button press shows an error).
+- Order of questions after an answer: quick generic follow-ups appear within about 2 s; when the score arrives (about 5-8 s) they
+  are replaced by the sharper ones derived from the problems. A candidate who carries on gets re-scored and the questions replaced again.
+
 **Routes** (operator bearer token for now):
 
 | Route | Purpose |

@@ -25,6 +25,13 @@ export interface RoomQuestion {
   /** follow_up: the answer it follows from. */
   answerId?: string;
   followKind?: "probe" | "clarify" | "deepen" | "move_on";
+  /**
+   * follow_up only. "fast": suggested the moment the answer ended. "score": derived from the problems the scoring found; these are
+   * better grounded, so they replace the fast ones for the same answer.
+   */
+  source?: "fast" | "score";
+  /** For source "score": the exact words of the candidate this question is about. */
+  aboutQuote?: string;
   status: "queued" | "asked" | "skipped";
   createdAt: string;
 }
@@ -48,9 +55,12 @@ export interface RoomScore {
   version: number;
   model: string;
   output: {
+    verdict: string;
     score: number;
     dimensions: { technicalCorrectness: number; depth: number; clarity: number; relevance: number };
     strengths: string[];
+    experience: { signal: "first_hand" | "unclear" | "generic"; evidence: string; probe: string };
+    problems: { quote: string; issue: string; correction: string; severity: "minor" | "major"; counterQuestion: string }[];
     gaps: string[];
     evidenceQuotes: string[];
     confidence: "low" | "medium" | "high";

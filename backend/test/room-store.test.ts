@@ -6,7 +6,7 @@ const q = (id: string, over: Partial<RoomQuestion> = {}): RoomQuestion => ({ id,
 const a = (id: string, startMs: number, over: Partial<RoomAnswer> = {}): RoomAnswer => ({ id, interviewId: "i-1", questionText: "q", text: "t", startMs, endMs: startMs + 1, state: "open", version: 0, ...over });
 const score = (answerId: string, version: number, n: number): RoomScore => ({
   interviewId: "i-1", answerId, version, model: "m", at: "2026-11-19T10:00:00Z",
-  output: { score: n, dimensions: { technicalCorrectness: n, depth: n, clarity: n, relevance: n }, strengths: [], gaps: [], evidenceQuotes: [], confidence: "medium", note: "" },
+  output: { verdict: "v", experience: { signal: "first_hand", evidence: "e", probe: "" }, problems: [], score: n, dimensions: { technicalCorrectness: n, depth: n, clarity: n, relevance: n }, strengths: [], gaps: [], evidenceQuotes: [], confidence: "medium", note: "" },
 });
 
 

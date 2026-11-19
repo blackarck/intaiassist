@@ -36,6 +36,9 @@ function scripted(script: Record<string, (unknown | Error)[]>): { factory: Model
 const httpError = (statusCode: number) => Object.assign(new Error(`HTTP ${statusCode}`), { statusCode });
 
 const goodScore = {
+  verdict: "Clear and mostly correct.",
+  experience: { signal: "first_hand", evidence: "named the view and the fix", probe: "" },
+  problems: [],
   score: 4,
   dimensions: { technicalCorrectness: 4, depth: 4, clarity: 4, relevance: 4 },
   strengths: ["clear"],
@@ -105,6 +108,24 @@ describe("runTask", () => {
     expect(calls["anthropic:sonnet"]).toBe(2);
   });
 
+  it("does not retry a model whose answer was cut off by the token limit; it goes to the fallback", async () => {
+    const calls: Record<string, number> = {};
+    const factory: ModelFactory = (spec) =>
+      new MockLanguageModelV4({
+        modelId: spec.name,
+        doGenerate: async () => {
+          calls[spec.id] = (calls[spec.id] ?? 0) + 1;
+          const cut = spec.id === "anthropic:sonnet";
+          return { content: [{ type: "text", text: cut ? '{"verdict": "The answer is cor' : JSON.stringify(goodScore) }], finishReason: { unified: cut ? "length" : "stop", raw: cut ? "length" : "stop" }, usage: { inputTokens: { total: 5 }, outputTokens: { total: 5 } }, warnings: [] } as never;
+        },
+      });
+    const { d } = deps(factory);
+    const res = await runTask(d, "score_answer", TASKS.score_answer.sample);
+    expect(res.ok && res.model).toBe("azure:gpt-5.4");
+    expect(calls["anthropic:sonnet"]).toBe(1); // not twice
+    expect(res.attempts.map((a) => a.outcome)).toEqual(["truncated", "ok"]);
+  });
+
   it("reports invalid_output when every model keeps returning rubbish", async () => {
     const { factory } = scripted({ "anthropic:sonnet": ["not json"], "azure:gpt-5.4": [{ score: 9 }] });
     const { d } = deps(factory);
@@ -148,8 +169,21 @@ describe("task rules", () => {
   it("score_answer rejects an overall score that contradicts its dimensions, and high confidence on a noisy transcript", () => {
     const t = TASKS.score_answer;
     const input = { ...t.sample, transcriptQuality: "noisy" as const };
-    expect(() => t.finalize!({ ...goodScore, score: 1 } as never, t.sample)).toThrow(/does not fit/);
+    expect(() => t.finalize!({ ...goodScore, score: 1, gaps: ["x"] } as never, t.sample)).toThrow(/does not fit/);
     expect(() => t.finalize!(goodScore as never, input)).toThrow(/noisy/);
+  });
+
+  it("score_answer demands real quotes for each problem, and a reason for a low score", () => {
+    const t = TASKS.score_answer;
+    const problem = { quote: "a slow query or a connection", issue: "vague", correction: "name the view you would query", severity: "minor" as const, counterQuestion: "Which view would you query first?" };
+    expect(() => t.finalize!({ ...goodScore, problems: [problem] } as never, t.sample)).not.toThrow();
+    expect(() => t.finalize!({ ...goodScore, problems: [{ ...problem, quote: "never said this" }] } as never, t.sample)).toThrow(/each problem quote/);
+    const low = { ...goodScore, score: 3, dimensions: { technicalCorrectness: 3, depth: 3, clarity: 3, relevance: 3 } };
+    expect(() => t.finalize!(low as never, t.sample)).toThrow(/must say why/);
+    expect(() => t.finalize!({ ...low, gaps: ["no limits"] } as never, t.sample)).not.toThrow();
+    const bad = { ...goodScore, score: 2, dimensions: { technicalCorrectness: 2, depth: 2, clarity: 2, relevance: 2 }, problems: [problem] };
+    expect(() => t.finalize!(bad as never, t.sample)).toThrow(/major problem/);
+    expect(() => t.finalize!({ ...bad, problems: [{ ...problem, severity: "major" }] } as never, t.sample)).not.toThrow();
   });
 
   it("scorecard refuses a hiring verdict", () => {
@@ -174,6 +208,9 @@ describe("task rules", () => {
     expect(occursIn("", "x")).toBe(false);
     expect(sameQuestion("What is a mutex?", "what is a MUTEX")).toBe(true);
     expect(sameQuestion("What is a mutex?", "Explain how TCP slow start works")).toBe(false);
+    // a short pointed follow-up is not a repeat of a long question that happens to contain its words
+    expect(sameQuestion("You said you led the migration from the monolith to services. Tell me about it.", "What did you personally do in the first 90 days of the migration?")).toBe(false);
+    expect(sameQuestion("Tell me about the migration you led", "Tell me about the migration that you led")).toBe(true);
   });
 
   it("fence neutralises a closing tag inside the text", () => {

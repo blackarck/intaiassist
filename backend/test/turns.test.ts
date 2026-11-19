@@ -79,6 +79,22 @@ describe("TurnDetector", () => {
     expect(d.onSegment(seg("candidate", "A mutex is a lock", 3000), 3200)).toEqual([]); // webhook retry
   });
 
+  it("stalled(): reports a finished answer once when the interviewer has gone quiet, never while they are talking", () => {
+    d.onSegment(seg("interviewer", "Explain mutexes", 0), 0);
+    d.onSegment(seg("candidate", "A mutex is a lock", 3000), 3000);
+    expect(d.stalled(9000, 10_000)).toBeUndefined(); // answer still open
+    d.tick(6000); // closes at 6000
+    expect(d.stalled(12_000, 10_000)).toBeUndefined(); // only 6 s since the close
+    expect(d.stalled(16_500, 10_000)).toBe("a1");
+    expect(d.stalled(30_000, 10_000)).toBeUndefined(); // once
+
+    d.onSegment(seg("interviewer", "And deadlocks", 31_000), 31_000);
+    d.onSegment(seg("candidate", "Two locks taken in different orders", 34_000), 34_000);
+    d.tick(40_000);
+    d.onSegment(seg("interviewer", "Right and how do you avoid that", 41_000), 41_000);
+    expect(d.stalled(80_000, 10_000)).toBeUndefined(); // the interviewer already moved on: nothing to nudge
+  });
+
   it("flush closes the open answer at the end of the meeting", () => {
     d.onSegment(seg("interviewer", "Last question", 0), 0);
     d.onSegment(seg("candidate", "My final answer", 3000), 3000);

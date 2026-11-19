@@ -79,3 +79,29 @@ export function applyEvent(state: RoomState, e: RoomEvent): RoomState {
       return next;
   }
 }
+
+/**
+ * What the coach panel shows RIGHT NOW. The interviewer is busy and will not press anything: this is derived from the latest answer
+ * and updates by itself as the answer ends, the score arrives, and questions are suggested.
+ */
+export type CoachView =
+  | { phase: "idle" }
+  | { phase: "listening"; question: string }
+  | { phase: "assessing"; question: string }
+  | { phase: "short"; question: string }
+  | { phase: "ready"; answer: Answer; score: Score; ask: Question[]; suggestion?: AssistItem };
+
+const MIN_WORDS = 8;
+
+export function coachView(s: RoomState): CoachView {
+  const a = s.answers.at(-1);
+  if (!a) return { phase: "idle" };
+  if (a.state === "open") return { phase: "listening", question: a.questionText };
+  const score = s.scores[a.id];
+  if (!score) return a.text.trim().split(/\s+/).length < MIN_WORDS ? { phase: "short", question: a.questionText } : { phase: "assessing", question: a.questionText };
+  const ask = s.questions.filter((q) => q.kind === "follow_up" && q.answerId === a.id && q.status === "queued");
+  // A suggestion offered after this answer (not one from an earlier answer).
+  const sug = s.assists[0];
+  const suggestion = sug && sug.at >= (s.scores[a.id]?.at ?? "") ? sug : undefined;
+  return { phase: "ready", answer: a, score, ask, suggestion };
+}

@@ -23,6 +23,9 @@ export function InterviewPage() {
     return () => clearInterval(t);
   }, [iv, tab, reload]);
 
+  // Once the call is on, the screen belongs to the coach: the invite instructions shrink to one line.
+  const live = ["in_meeting", "ended"].includes(liveStatus ?? iv?.status ?? "");
+
   if (loading && !iv) return <Spinner />;
   if (error || !iv) return <div className="space-y-3"><ErrorNote>{error ?? "Interview not found."}</ErrorNote><Link to="/" className="text-sm text-indigo-600 hover:underline">Back to interviews</Link></div>;
 
@@ -37,6 +40,9 @@ export function InterviewPage() {
         </div>
       </div>
 
+      {live ? (
+        <p className="text-sm muted">Invite address: <code className="select-all font-mono">{iv.address}</code></p>
+      ) : (
       <section aria-label="Invite address" className="card space-y-2 p-4">
         <p className="text-sm font-medium">Add this address to your meeting invite</p>
         <div className="flex flex-wrap items-center gap-2">
@@ -46,6 +52,7 @@ export function InterviewPage() {
         <p className="text-xs muted">Invite it like any attendee from Teams, Zoom or Google Calendar. The assistant joins a minute before the start. In Teams, admit it from the lobby. It listens only; it never speaks in the meeting.</p>
         {iv.recording?.ok === false && <ErrorNote>Recording was not permitted in this meeting, so no transcript is possible ({iv.recording.detail}).</ErrorNote>}
       </section>
+      )}
 
       <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
         {(["prepare", "room"] as const).map((t) => (

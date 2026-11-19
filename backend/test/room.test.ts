@@ -13,6 +13,9 @@ import { fakeController } from "./helpers.js";
 const ANSWER = "Our payments service started timing out because the connection pool was exhausted by a report query";
 
 const scoreOut = {
+  verdict: "Found the root cause and a sound fix; prevention was thin.",
+  experience: { signal: "first_hand", evidence: "named the report query and the replica", probe: "" },
+  problems: [],
   score: 4,
   dimensions: { technicalCorrectness: 4, depth: 4, clarity: 4, relevance: 4 },
   strengths: ["found root cause"],
@@ -20,6 +23,12 @@ const scoreOut = {
   evidenceQuotes: ["the connection pool was exhausted"],
   confidence: "high",
   note: "",
+};
+const problemScore = {
+  ...scoreOut,
+  score: 2,
+  dimensions: { technicalCorrectness: 2, depth: 2, clarity: 3, relevance: 3 },
+  problems: [{ quote: "connection pool was exhausted", issue: "Does not say why the pool ran dry.", correction: "A long-held connection or leak; check active sessions.", severity: "major", counterQuestion: "How did you find out what was holding the connections?" }],
 };
 const followOut = { followUps: [{ text: "What did you change so it cannot happen again?", reason: "prevention not covered", kind: "probe" }] };
 const cardOut = { summary: "Solid on incidents.", strengths: ["root cause analysis"], risks: ["prevention"], followUpsNextRound: ["Design a load test"] };
@@ -92,6 +101,80 @@ describe("RoomService: a full interview", () => {
     // events are numbered in increasing order
     const seqs = t.events.map((e) => e.seq!).filter(Boolean);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  });
+
+  it("turns the problems found in an answer into pointed counter-questions that replace the generic follow-ups", async () => {
+    const t2 = await setup(taskModels({ score: problemScore }));
+    await t2.say(seg("interviewer", "Tell me about a production incident you handled", 0));
+    await t2.say(seg("candidate", ANSWER, 5000));
+    clock += 3000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    const snap = await t2.room.snapshot("i-1");
+    const followUps = snap.questions.filter((q) => q.kind === "follow_up");
+    expect(followUps).toHaveLength(1); // the fast, generic one is gone whichever finished first
+    expect(followUps[0]).toMatchObject({ text: "How did you find out what was holding the connections?", why: "Does not say why the pool ran dry.", source: "score", aboutQuote: "connection pool was exhausted", followKind: "probe", keyPoints: ["A long-held connection or leak; check active sessions."] });
+    expect(snap.answers[0]!.score?.output.problems[0]).toMatchObject({ quote: "connection pool was exhausted", severity: "major" });
+  });
+
+  it("adds a 'prove you did the work' question when the answer sounds generic, after the questions about what was wrong", async () => {
+    const generic = { ...problemScore, experience: { signal: "generic", evidence: "textbook phrasing, no detail of their own", probe: "What exactly did you change yourself, and what number moved?" } };
+    const t2 = await setup(taskModels({ score: generic }));
+    await t2.say(seg("interviewer", "Tell me about a production incident you handled", 0));
+    await t2.say(seg("candidate", ANSWER, 5000));
+    clock += 3000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    const qs = (await t2.room.snapshot("i-1")).questions.filter((q) => q.kind === "follow_up");
+    expect(qs.map((q) => q.text)).toEqual(["How did you find out what was holding the connections?", "What exactly did you change yourself, and what number moved?"]);
+    expect(qs[1]).toMatchObject({ why: "Check they did the work: textbook phrasing, no detail of their own", source: "score" });
+  });
+
+  it("offers a suggestion on its own when the interviewer stays quiet after an answer, once, and not if they carry on", async () => {
+    const t2 = await setup();
+    await t2.room.configure({ interviewId: "i-1", roleTitle: "Backend", jd: "x", presetQuestions: [] });
+    await t2.say(seg("interviewer", "Tell me about a production incident you handled", 0));
+    await t2.say(seg("candidate", ANSWER, 5000));
+    clock += 3000;
+    t2.room.tickAll(); // answer closes
+    await t2.room.idle("i-1");
+    clock += 5000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    expect(t2.events.some((e) => e.type === "assist")).toBe(false); // 5 s of quiet is normal
+    clock += 6000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    expect(t2.events.filter((e) => e.type === "assist").map((e) => (e.data as { auto?: boolean }).auto)).toEqual([true]);
+    clock += 60_000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    expect(t2.events.filter((e) => e.type === "assist")).toHaveLength(1); // not repeated
+
+    // when the interviewer has already asked the next question, nothing is offered
+    await t2.say(seg("interviewer", "Next, how do you size a connection pool", 90_000));
+    await t2.say(seg("candidate", "I start from the database connection limit divided by the number of instances", 95_000));
+    clock += 3000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    await t2.say(seg("interviewer", "Good and what about when traffic doubles suddenly", 110_000));
+    clock += 60_000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    expect(t2.events.filter((e) => e.type === "assist")).toHaveLength(1);
+  });
+
+  it("a failed automatic suggestion stays silent (no error banner for something nobody asked for)", async () => {
+    const t2 = await setup(taskModels({ assist: new Error("down") }));
+    await t2.say(seg("interviewer", "Tell me about a production incident you handled", 0));
+    await t2.say(seg("candidate", ANSWER, 5000));
+    clock += 3000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    clock += 11_000;
+    t2.room.tickAll();
+    await t2.room.idle("i-1");
+    expect(t2.events.some((e) => e.type === "ai_error" && (e.data as { task: string }).task === "assist")).toBe(false);
   });
 
   it("keeps a question that was not on the list as a 'live' one", async () => {

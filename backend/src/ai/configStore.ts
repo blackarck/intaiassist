@@ -24,7 +24,7 @@ export interface AiRun {
   ok: boolean;
   /** `ok` or an error code: timeout, outage, invalid_output, disabled, not_configured, bad_input. */
   outcome: string;
-  attempts: { model: string; outcome: string; ms: number }[];
+  attempts: { model: string; outcome: string; ms: number; /** Which rule rejected the answer. Never contains interview text. */ detail?: string }[];
   inputTokens: number;
   outputTokens: number;
   ms: number;

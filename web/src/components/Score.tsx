@@ -37,6 +37,7 @@ export function AnswerCard({ answer, score }: { answer: Answer; score?: Score })
       <p className="line-clamp-3 text-sm muted">{answer.text}</p>
       {o && (
         <>
+          <p className="text-sm">{o.verdict}</p>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
             {DIMS.map(([k, label]) => (
               <div key={k}>
@@ -45,6 +46,14 @@ export function AnswerCard({ answer, score }: { answer: Answer; score?: Score })
               </div>
             ))}
           </dl>
+          {o.problems.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-red-700 dark:text-red-400">Problems</h4>
+              <ul className="mt-1 space-y-1.5 text-sm">
+                {o.problems.map((p, i) => <li key={i}><span className="italic">“{unquote(p.quote)}”</span>: {p.issue} <span className="muted">Correct: {p.correction}</span></li>)}
+              </ul>
+            </div>
+          )}
           {o.strengths.length > 0 && <List title="Strengths" items={o.strengths} tone="text-emerald-700 dark:text-emerald-400" />}
           {o.gaps.length > 0 && <List title="Gaps" items={o.gaps} tone="text-amber-700 dark:text-amber-400" />}
           {o.evidenceQuotes.length > 0 && (

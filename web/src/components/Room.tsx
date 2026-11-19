@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api";
 import { useRoom } from "../hooks";
 import type { Question, Scorecard } from "../types";
+import { Coach } from "./Coach";
 import { AnswerCard, ScoreBadge } from "./Score";
 import { CopyButton, ErrorNote, Spinner, StatusBadge, clock, unquote } from "./ui";
 
@@ -31,10 +32,9 @@ export function Room({ id, status, onStatus }: { id: string; status: string; onS
   if (!state.loaded) return <Spinner label="Opening the room…" />;
 
   // Suggestions for the answer just given are the ones to use now; older ones stay available but out of the way.
+  // The coach panel above carries the follow-ups for the answer just given; older ones stay available here.
   const lastAnswerId = state.answers.at(-1)?.id;
-  const queuedFollowUps = state.questions.filter((q) => q.kind === "follow_up" && q.status === "queued");
-  const followUps = queuedFollowUps.filter((q) => q.answerId === lastAnswerId);
-  const olderFollowUps = queuedFollowUps.filter((q) => q.answerId !== lastAnswerId);
+  const olderFollowUps = state.questions.filter((q) => q.kind === "follow_up" && q.status === "queued" && q.answerId !== lastAnswerId);
   const upNext = state.questions.filter((q) => q.kind !== "follow_up" && q.kind !== "live" && q.status === "queued");
   const asked = state.questions.filter((q) => q.status === "asked");
 
@@ -53,7 +53,7 @@ export function Room({ id, status, onStatus }: { id: string; status: string; onS
 
       {state.notices[0] && <ErrorNote>{state.notices[0].text}</ErrorNote>}
       {assistError && <ErrorNote>{assistError}</ErrorNote>}
-      {state.assists[0] && <AssistCard item={state.assists[0]} />}
+      <Coach state={state} />
       {state.scorecard && <ScorecardView card={state.scorecard} />}
 
       <div className="flex gap-1 lg:hidden" role="tablist">
@@ -65,12 +65,6 @@ export function Room({ id, status, onStatus }: { id: string; status: string; onS
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)]">
         <section aria-label="Questions" className={`space-y-3 ${tab === "questions" ? "" : "hidden lg:block"}`}>
           <h2 className="text-sm font-semibold">Questions</h2>
-          {followUps.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-xs font-medium uppercase tracking-wide text-indigo-600 dark:text-indigo-400">Follow up on the last answer</h3>
-              {followUps.map((q) => <QuestionCard key={q.id} q={q} highlight />)}
-            </div>
-          )}
           <div className="space-y-2">
             <h3 className="text-xs font-medium uppercase tracking-wide muted">Up next</h3>
             {upNext.length === 0 ? <p className="text-sm muted">No prepared questions left.</p> : upNext.map((q) => <QuestionCard key={q.id} q={q} />)}

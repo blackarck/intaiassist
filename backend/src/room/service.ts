@@ -18,6 +18,11 @@ export interface RoomDeps {
   reopenMs?: number;
   /** Cap on simultaneous AI calls across all interviews. */
   maxConcurrentAi?: number;
+  /**
+   * If the candidate has finished an answer and the interviewer has said nothing for this long, offer a suggestion without being
+   * asked (they are busy taking notes, not pressing buttons). 0 turns it off.
+   */
+  autoAssistMs?: number;
   /** Answers shorter than this many words are shown but not scored. */
   minScoreWords?: number;
   onWarn?: (message: string, err?: unknown) => void;
@@ -142,9 +147,11 @@ export class RoomService {
   }
 
   tickAll() {
+    const wait = this.d.autoAssistMs ?? 10_000;
     for (const [id, st] of this.states) {
       const effects = st.detector.tick(this.now());
       if (effects.length) this.enqueue(id, (s) => this.apply(id, s, effects));
+      if (wait > 0 && st.detector.stalled(this.now(), wait) !== undefined) this.spawn(id, () => this.assist(id, { auto: true }));
     }
   }
 
@@ -192,7 +199,7 @@ export class RoomService {
   }
 
   /** "Assist me": one suggestion grounded in this interview's own transcript, the resume and the JD. */
-  async assist(interviewId: string) {
+  async assist(interviewId: string, opts: { auto?: boolean } = {}) {
     const segs = await this.d.transcripts.listSegments(interviewId);
     const turns = segs.filter((s) => s.text.trim()).map((s) => ({ role: roleOf(s.role), text: s.text.slice(0, 1500) }));
     if (turns.length === 0) return fail("no_transcript", "nothing has been said yet");
@@ -207,8 +214,8 @@ export class RoomService {
       jd: setup?.jd.slice(0, 1500),
       asked,
     }, interviewId);
-    if (!res.ok) return this.aiError(interviewId, "assist", res);
-    await this.emit(interviewId, "assist", res.output, true);
+    if (!res.ok) return opts.auto ? { ok: false as const, error: res.error } : this.aiError(interviewId, "assist", res);
+    await this.emit(interviewId, "assist", { ...(res.output as object), auto: opts.auto === true }, true);
     return { ok: true as const, assist: res.output };
   }
 
@@ -221,7 +228,7 @@ export class RoomService {
     if (scored.length === 0) return fail("nothing_to_score", "no answer has been scored");
     const items = scored.slice(-40).map((a) => {
       const s = latest.get(a.id)!.output;
-      return { question: a.questionText.slice(0, 600), answerSummary: a.text.slice(0, 600), score: s.score, gaps: s.gaps };
+      return { question: a.questionText.slice(0, 600), answerSummary: a.text.slice(0, 600), score: s.score, gaps: [...s.problems.map((p) => p.issue), ...s.gaps].slice(0, 4) };
     });
     const res = await this.run("scorecard", { role: setup?.roleTitle ?? "Interview", items }, interviewId);
     if (!res.ok) return this.aiError(interviewId, "scorecard", res);
@@ -324,11 +331,14 @@ export class RoomService {
       jd: setup?.jd.slice(0, 1500),
     }, a.interviewId);
     if (!res.ok) return void (await this.aiError(a.interviewId, "next_questions", res));
-    // A newer close of the same answer replaces the older suggestions.
-    const stale = (await this.d.rooms.listQuestions(a.interviewId)).filter((q) => q.kind === "follow_up" && q.answerId === a.id && q.status === "queued").map((q) => q.id);
+    const existing = (await this.d.rooms.listQuestions(a.interviewId)).filter((q) => q.kind === "follow_up" && q.answerId === a.id && q.status === "queued");
+    // The score found specific problems and already supplied pointed questions for them: those are better, keep them.
+    if (existing.some((q) => q.source === "score")) return;
+    // A newer close of the same answer replaces the older fast suggestions.
+    const stale = existing.map((q) => q.id);
     await this.d.rooms.deleteQuestions(a.interviewId, stale);
     const items = (res.output as { followUps: { text: string; reason: string; kind: RoomQuestion["followKind"] }[] }).followUps.map((f): RoomQuestion => ({
-      id: this.id(), interviewId: a.interviewId, kind: "follow_up", text: f.text, why: f.reason, keyPoints: [], probes: [], answerId: a.id, followKind: f.kind, status: "queued", createdAt: new Date(this.now()).toISOString(),
+      id: this.id(), interviewId: a.interviewId, kind: "follow_up", text: f.text, why: f.reason, keyPoints: [], probes: [], answerId: a.id, followKind: f.kind, source: "fast", status: "queued", createdAt: new Date(this.now()).toISOString(),
     }));
     for (const q of items) await this.d.rooms.saveQuestion(q);
     await this.emit(a.interviewId, "questions", { reason: "follow_up", answerId: a.id, items, removedIds: stale }, true);
@@ -341,12 +351,43 @@ export class RoomService {
       question: { text: a.questionText.slice(0, 600), keyPoints: current?.keyPoints },
       answer: a.text.slice(0, 4000),
       level: setup?.roleLevel,
+      resumeSummary: setup?.resumeSummary?.slice(0, 1500),
       transcriptQuality: "clean",
     }, a.interviewId);
     if (!res.ok) return void (await this.aiError(a.interviewId, "score_answer", res, a.id));
     const score: RoomScore = { interviewId: a.interviewId, answerId: a.id, version: a.version, model: res.model, output: res.output as RoomScore["output"], at: new Date(this.now()).toISOString() };
     await this.d.rooms.saveScore(score);
     await this.emit(a.interviewId, "score", score, true);
+    await this.counterQuestions(a, score);
+  }
+
+  /**
+   * Turn the problems the scoring found into questions the interviewer can ask now, one per problem, each tied to the candidate's own
+   * words. They replace the generic follow-ups for the same answer. Skipped if the candidate has since carried on (a newer version of
+   * the answer is being scored and will produce its own).
+   */
+  private async counterQuestions(a: RoomAnswer, score: RoomScore) {
+    const o = score.output;
+    const picks = o.problems.filter((p) => p.counterQuestion.trim()).slice(0, 2);
+    // Not first-hand? Add the question that makes them prove they did the work. It goes last: fix what is wrong first.
+    const proof = o.experience.signal !== "first_hand" && o.experience.probe.trim() ? o.experience : undefined;
+    if (picks.length === 0 && !proof) return;
+    const current = (await this.d.rooms.listAnswers(a.interviewId)).find((x) => x.id === a.id);
+    if (current && current.version > a.version) return;
+    const stale = (await this.d.rooms.listQuestions(a.interviewId)).filter((q) => q.kind === "follow_up" && q.answerId === a.id && q.status === "queued").map((q) => q.id);
+    await this.d.rooms.deleteQuestions(a.interviewId, stale);
+    const items = picks.map((p): RoomQuestion => ({
+      id: this.id(), interviewId: a.interviewId, kind: "follow_up", text: p.counterQuestion, why: p.issue, keyPoints: p.correction ? [p.correction] : [], probes: [],
+      answerId: a.id, followKind: p.severity === "major" ? "probe" : "clarify", source: "score", aboutQuote: p.quote, status: "queued", createdAt: new Date(this.now()).toISOString(),
+    }));
+    if (proof) {
+      items.push({
+        id: this.id(), interviewId: a.interviewId, kind: "follow_up", text: proof.probe, why: `Check they did the work: ${proof.evidence}`, keyPoints: [], probes: [],
+        answerId: a.id, followKind: "probe", source: "score", status: "queued", createdAt: new Date(this.now()).toISOString(),
+      });
+    }
+    for (const q of items) await this.d.rooms.saveQuestion(q);
+    await this.emit(a.interviewId, "questions", { reason: "follow_up", answerId: a.id, items, removedIds: stale }, true);
   }
 
   // ---- plumbing

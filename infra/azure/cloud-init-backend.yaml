@@ -1,12 +1,13 @@
 #cloud-config
-# First-boot setup for the backend VM (Ubuntu 24.04): Docker + Compose, SSH hardening, automatic security updates.
+# First-boot setup for the backend VM (Ubuntu 24.04): SSH hardening and automatic security updates.
+# Docker is NOT installed here: deploy-backend.sh runs vm-install-docker.sh, which uses Docker's official apt repository.
+# (Ubuntu's own docker.io package was undownloadable from Azure's mirror on first boot and hung cloud-init for 20+ minutes.)
 package_update: true
-package_upgrade: true
 packages:
-  - docker.io
-  - docker-compose-v2
   - unattended-upgrades
   - python3
+  - ca-certificates
+  - curl
 
 write_files:
   - path: /etc/ssh/sshd_config.d/99-hardening.conf
@@ -17,8 +18,6 @@ write_files:
       PermitRootLogin no
 
 runcmd:
-  - systemctl enable --now docker
-  - usermod -aG docker azureuser
   - mkdir -p /opt/intassist
   - chown azureuser:azureuser /opt/intassist
   - systemctl restart ssh

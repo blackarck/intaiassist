@@ -16,7 +16,8 @@ RECALL_REGION="${RECALL_REGION:-us-west-2}"
 
 [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ && "$ALIAS_DOMAIN" =~ ^[a-z0-9.-]+$ && "$RECALL_REGION" =~ ^[a-z]{2}-[a-z]+-[0-9]$ ]] || { echo "bad DOMAIN / ALIAS_DOMAIN / RECALL_REGION"; exit 1; }
 
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$HERE/../.." && pwd)"
 cd "$REPO"
 [ -z "$(git status --porcelain)" ] || echo "WARNING: uncommitted changes are NOT deployed (only git HEAD is)."
 
@@ -39,6 +40,9 @@ fi
 
 SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
 ssh_() { ssh "${SSH_OPTS[@]}" "azureuser@$IP" "$@"; }
+
+# Docker comes from Docker's official repo (idempotent: no-op when already installed)
+ssh_ 'bash -s' < "$HERE/vm-install-docker.sh"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 git archive --format=tar.gz -o "$TMP/app.tgz" HEAD backend deploy

@@ -109,7 +109,10 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
         payload: raw,
         nowMs: cfg.nowMs?.(),
       });
-      if (!verdict.ok) return reply.code(401).send({ error: "invalid signature" });
+      if (!verdict.ok) {
+        console.warn(`[recall] webhook rejected: ${verdict.reason}`);
+        return reply.code(401).send({ error: "invalid signature" });
+      }
 
       let payload: unknown;
       try {
@@ -118,7 +121,13 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
         return reply.code(400).send({ error: "invalid json" });
       }
       // 200 for events we do not use, otherwise Recall retries them (up to 60 times for real-time endpoints)
-      return handleRecallWebhook(payload, cfg);
+      const result = await handleRecallWebhook(payload, cfg);
+
+      // Operational log: event name and outcome only. Never the payload, which holds transcript text and names.
+      const event = typeof (payload as { event?: unknown })?.event === "string" ? (payload as { event: string }).event : "unknown";
+      const routine = event.startsWith("transcript.") && result.status === "ok"; // one line per utterance would be noise
+      if (!routine) console.log(`[recall] ${event} -> ${result.status}${result.status === "ignored" ? ` (${result.reason})` : ""}`);
+      return result;
     });
   });
 

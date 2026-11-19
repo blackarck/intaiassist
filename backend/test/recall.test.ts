@@ -157,7 +157,7 @@ describe("RecallBotController", () => {
     expect(api.deleteBot.mock.invocationCallOrder[0]!).toBeLessThan(api.createBot.mock.invocationCallOrder[0]!);
   });
 
-  it("cancel: deletes a scheduled bot; falls back to leave_call if delete fails; ad-hoc bots just leave", async () => {
+  it("cancel: always tries delete first; falls back to leave_call if delete fails", async () => {
     const a = setup();
     await a.ctl.cancel({ ...base, recallBotId: "b1", joinMode: "scheduled" });
     expect(a.api.deleteBot).toHaveBeenCalledWith("b1");
@@ -168,16 +168,25 @@ describe("RecallBotController", () => {
     await b.ctl.cancel({ ...base, recallBotId: "b2", joinMode: "scheduled" });
     expect(b.api.leaveCall).toHaveBeenCalledWith("b2");
 
+    // an ad-hoc bot that has not joined yet (join_at still ahead) must be deleted, not asked to leave (Recall answers 400)
     const c = setup();
     await c.ctl.cancel({ ...base, recallBotId: "b3", joinMode: "ad_hoc" });
-    expect(c.api.deleteBot).not.toHaveBeenCalled();
-    expect(c.api.leaveCall).toHaveBeenCalledWith("b3");
+    expect(c.api.deleteBot).toHaveBeenCalledWith("b3");
+    expect(c.api.leaveCall).not.toHaveBeenCalled();
+
+    // both calls failing is reported, never thrown: the interview is cancelled regardless
+    const d = setup();
+    d.api.deleteBot.mockRejectedValueOnce(new Error("405"));
+    d.api.leaveCall.mockRejectedValueOnce(new Error("400"));
+    await expect(d.ctl.cancel({ ...base, recallBotId: "b4", joinMode: "ad_hoc" })).resolves.toBeUndefined();
+    expect(d.warn).toHaveBeenCalledWith("could not stop Recall bot", expect.any(Error));
   });
 
   it("cancel never throws and does nothing without a bot", async () => {
     const { api, ctl, warn } = setup();
     await ctl.cancel(base);
     expect(api.deleteBot).not.toHaveBeenCalled();
+    api.deleteBot.mockRejectedValueOnce(new Error("recall down"));
     api.leaveCall.mockRejectedValueOnce(new Error("recall down"));
     await expect(ctl.cancel({ ...base, recallBotId: "b4", joinMode: "ad_hoc" })).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();

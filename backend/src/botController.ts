@@ -54,13 +54,14 @@ export class RecallBotController implements BotController {
     const botId = interview.recallBotId;
     if (!botId) return;
     try {
-      if (interview.joinMode === "scheduled") {
-        try {
-          await this.recall.deleteBot(botId); // not joined yet: remove the reservation
-          return;
-        } catch (e) {
-          this.opts.onWarn?.("delete of scheduled bot failed, asking it to leave instead", e);
-        }
+      // Always try to delete first: a bot that has not joined yet (scheduled, OR ad hoc with a join time still ahead)
+      // cannot be told to leave, and deleting it is what stops it from being billed. A bot already in the call refuses
+      // the delete, and is then asked to leave.
+      try {
+        await this.recall.deleteBot(botId);
+        return;
+      } catch (e) {
+        this.opts.onWarn?.("delete of bot failed, asking it to leave instead", e);
       }
       await this.recall.leaveCall(botId);
     } catch (e) {

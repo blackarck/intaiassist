@@ -1,5 +1,8 @@
 # End-to-End Flow: From Invite to Scorecard
 
+> **Status (2026-11-19):** the live-audio path in this flow (our own Teams media bot, Azure Speech) was replaced by Recall.ai (see [recall-integration.md](recall-integration.md)). The invite intake, the coaching loop and the interviewer-facing parts below still describe the design.
+
+
 _Assumes Option A works: our own Graph calling bot joins and receives audio. See [bot-join-research.md](bot-join-research.md)._
 
 ## Key design point: one Teams app does three jobs

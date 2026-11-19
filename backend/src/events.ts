@@ -24,6 +24,9 @@ export async function handleBotEvent(
   const interview = await deps.store.findById(interviewId);
   if (!interview) return { ok: false, error: "unknown_interview" };
 
+  // A cancelled interview stays cancelled: the "call ended" that follows our own cancel must not overwrite it.
+  if (interview.status === "cancelled") return { ok: true };
+
   if (e.type === "segment") {
     deps.onSegment?.(e.segment);
     return { ok: true };

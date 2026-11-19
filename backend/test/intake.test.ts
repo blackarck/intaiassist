@@ -1,18 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import { Scheduler, type BotDispatcher } from "../src/scheduler.js";
 import { InMemoryStore } from "../src/store.js";
+import { auth, fakeController, icsB64 } from "./helpers.js";
 
 const TEAMS = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_ABC%40thread.v2/0?context=x";
-const TOKEN = "test-token";
-const auth = { authorization: `Bearer ${TOKEN}` };
-
-function icsB64(method: string, uid: string, dtstart?: string) {
-  const lines = ["BEGIN:VCALENDAR", `METHOD:${method}`, "BEGIN:VEVENT", `UID:${uid}`];
-  if (dtstart) lines.push(`DTSTART:${dtstart}`);
-  lines.push("END:VEVENT", "END:VCALENDAR");
-  return Buffer.from(lines.join("\r\n")).toString("base64");
-}
+const ZOOM = "https://us02web.zoom.us/j/81234567890?pwd=AbCdEf123";
 
 function invite(over: Record<string, unknown> = {}) {
   return {
@@ -27,206 +19,121 @@ function invite(over: Record<string, unknown> = {}) {
 }
 
 describe("intake API", () => {
-  let dispatcher: BotDispatcher & { join: ReturnType<typeof vi.fn>; leave: ReturnType<typeof vi.fn> };
-  let now: number;
-  let app: ReturnType<typeof buildApp>;
+  let controller: ReturnType<typeof fakeController>;
   let store: InMemoryStore;
+  let app: ReturnType<typeof buildApp>;
   let interviewId: string;
 
+  const post = (url: string, payload: Record<string, unknown>, headers: Record<string, string> = auth) =>
+    app.inject({ method: "POST", url, headers, payload });
+
   beforeEach(async () => {
-    // Fake only what the scheduler uses; faking setImmediate/nextTick would hang Fastify's inject().
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    now = Date.parse("2026-11-20T09:00:00Z");
-    vi.setSystemTime(now);
-    dispatcher = { join: vi.fn().mockResolvedValue(undefined), leave: vi.fn().mockResolvedValue(undefined) };
+    controller = fakeController();
     store = new InMemoryStore();
-    app = buildApp({
-      store,
-      scheduler: new Scheduler(dispatcher, 60_000, () => Date.now()),
-      aliasDomain: "bot.test",
-      intakeToken: TOKEN,
-      enableDevRoutes: true,
-    });
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/dev/interviews",
-      headers: auth,
-      payload: { alias: "7kq2", ownerEmail: "recruiter@acme.com" },
-    });
+    app = buildApp({ store, controller, aliasDomain: "bot.test", intakeToken: "test-token", enableDevRoutes: true });
+    const res = await post("/api/dev/interviews", { alias: "7kq2", ownerEmail: "recruiter@acme.com" });
     interviewId = res.json().id;
   });
 
   it("rejects missing or wrong token", async () => {
-    const r1 = await app.inject({ method: "POST", url: "/api/intake/meeting-invite", payload: invite() });
-    expect(r1.statusCode).toBe(401);
-    const r2 = await app.inject({
-      method: "POST",
-      url: "/api/intake/meeting-invite",
-      headers: { authorization: "Bearer nope" },
-      payload: invite(),
-    });
-    expect(r2.statusCode).toBe(401);
+    expect((await post("/api/intake/meeting-invite", invite(), {})).statusCode).toBe(401);
+    expect((await post("/api/intake/meeting-invite", invite(), { authorization: "Bearer nope" })).statusCode).toBe(401);
   });
 
-  it("schedules the bot 60s before start and dispatches the join URL", async () => {
-    const res = await app.inject({ method: "POST", url: "/api/intake/meeting-invite", headers: auth, payload: invite() });
-    expect(res.json()).toMatchObject({ status: "scheduled", interviewId, runAt: "2026-11-20T09:59:00.000Z" });
-    expect(dispatcher.join).not.toHaveBeenCalled();
+  it("creates the bot with the link and start time, and stores the bot id", async () => {
+    const res = await post("/api/intake/meeting-invite", invite());
+    expect(res.json()).toMatchObject({ status: "scheduled", interviewId, mode: "scheduled", senderMismatch: false });
 
-    // now=09:00, start=10:00, lead=60s -> fires at 09:59, i.e. 59 min from now
-    await vi.advanceTimersByTimeAsync(58 * 60_000 + 59_000);
-    expect(dispatcher.join).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(dispatcher.join).toHaveBeenCalledWith({ interviewId, joinUrl: TEAMS });
+    expect(controller.calls.schedule).toHaveLength(1);
+    expect(controller.calls.schedule[0]).toMatchObject({
+      id: interviewId,
+      joinUrl: TEAMS,
+      platform: "teams",
+      startsAt: "2026-11-20T10:00:00Z",
+      icalUid: "uid-1",
+    });
+    expect(await store.findById(interviewId)).toMatchObject({ status: "scheduled", recallBotId: "bot-1", joinMode: "scheduled" });
+    expect((await store.findByBotId("bot-1"))?.id).toBe(interviewId);
   });
 
-  it("joins immediately when no start time is known", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/intake/meeting-invite",
-      headers: auth,
-      payload: invite({ attachments: [] }),
-    });
-    expect(res.json().status).toBe("scheduled");
-    await vi.advanceTimersByTimeAsync(1);
-    expect(dispatcher.join).toHaveBeenCalledTimes(1);
+  it("works for a Zoom invite", async () => {
+    await post("/api/intake/meeting-invite", invite({ body: `Join Zoom Meeting ${ZOOM}` }));
+    expect(controller.calls.schedule[0]).toMatchObject({ joinUrl: ZOOM, platform: "zoom" });
   });
 
-  it("reschedule replaces the pending job (no double join)", async () => {
-    await app.inject({ method: "POST", url: "/api/intake/meeting-invite", headers: auth, payload: invite() });
-    await app.inject({
-      method: "POST",
-      url: "/api/intake/meeting-invite",
-      headers: auth,
-      payload: invite({
-        messageId: "m2",
-        attachments: [{ name: "invite.ics", contentBytes: icsB64("REQUEST", "uid-1", "20261120T120000Z") }],
-      }),
-    });
-    await vi.advanceTimersByTimeAsync(4 * 3600_000);
-    expect(dispatcher.join).toHaveBeenCalledTimes(1);
+  it("passes the previous bot id on reschedule so the controller can replace it", async () => {
+    await post("/api/intake/meeting-invite", invite());
+    await post("/api/intake/meeting-invite", invite({
+      messageId: "m2",
+      attachments: [{ name: "invite.ics", contentBytes: icsB64("REQUEST", "uid-1", "20261120T120000Z") }],
+    }));
+    expect(controller.calls.schedule).toHaveLength(2);
+    expect(controller.calls.schedule[1]).toMatchObject({ recallBotId: "bot-1", joinMode: "scheduled", startsAt: "2026-11-20T12:00:00Z" });
+    expect((await store.findById(interviewId))?.recallBotId).toBe("bot-2");
   });
 
-  it("cancellation cancels the job", async () => {
-    await app.inject({ method: "POST", url: "/api/intake/meeting-invite", headers: auth, payload: invite() });
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/intake/meeting-invite",
-      headers: auth,
-      payload: invite({
-        subject: "Canceled: Interview",
-        attachments: [{ name: "invite.ics", contentBytes: icsB64("CANCEL", "uid-1") }],
-      }),
-    });
+  it("cancellation stops the bot and marks the interview cancelled", async () => {
+    await post("/api/intake/meeting-invite", invite());
+    const res = await post("/api/intake/meeting-invite", invite({
+      subject: "Canceled: Interview",
+      attachments: [{ name: "invite.ics", contentBytes: icsB64("CANCEL", "uid-1") }],
+    }));
     expect(res.json()).toMatchObject({ status: "cancelled", interviewId });
-    await vi.advanceTimersByTimeAsync(4 * 3600_000);
-    expect(dispatcher.join).not.toHaveBeenCalled();
+    expect(controller.calls.cancel).toHaveLength(1);
+    expect(controller.calls.cancel[0]).toMatchObject({ recallBotId: "bot-1" });
     expect((await store.findById(interviewId))?.status).toBe("cancelled");
   });
 
   it("rejects an unknown alias and ignores mail without an alias", async () => {
-    const unknown = await app.inject({
-      method: "POST",
-      url: "/api/intake/meeting-invite",
-      headers: auth,
-      payload: invite({ to: "iv-nope1@bot.test" }),
+    expect((await post("/api/intake/meeting-invite", invite({ to: "iv-nope1@bot.test" }))).json()).toEqual({
+      status: "rejected",
+      reason: "unknown_alias",
     });
-    expect(unknown.json()).toEqual({ status: "rejected", reason: "unknown_alias" });
-
-    const none = await app.inject({
-      method: "POST",
-      url: "/api/intake/meeting-invite",
-      headers: auth,
-      payload: invite({ to: "someone@else.com" }),
+    expect((await post("/api/intake/meeting-invite", invite({ to: "someone@else.com" }))).json()).toEqual({
+      status: "ignored",
+      reason: "no_alias",
     });
-    expect(none.json()).toEqual({ status: "ignored", reason: "no_alias" });
+    expect(controller.calls.schedule).toHaveLength(0);
   });
 
   it("does not let a paid alias be re-bound to a different meeting", async () => {
-    await app.inject({ method: "POST", url: "/api/intake/meeting-invite", headers: auth, payload: invite() });
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/intake/meeting-invite",
-      headers: auth,
-      payload: invite({
-        attachments: [{ name: "invite.ics", contentBytes: icsB64("REQUEST", "uid-OTHER", "20261121T100000Z") }],
-      }),
-    });
+    await post("/api/intake/meeting-invite", invite());
+    const res = await post("/api/intake/meeting-invite", invite({
+      attachments: [{ name: "invite.ics", contentBytes: icsB64("REQUEST", "uid-OTHER", "20261121T100000Z") }],
+    }));
     expect(res.json()).toEqual({ status: "rejected", reason: "alias_bound_to_other_meeting" });
+    expect(controller.calls.schedule).toHaveLength(1);
   });
 
-  it("ignores an invite with no Teams link", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/intake/meeting-invite",
-      headers: auth,
-      payload: invite({ body: "<p>see you at the office</p>" }),
-    });
-    expect(res.json()).toEqual({ status: "ignored", reason: "no_join_url" });
+  it("ignores an invite with no meeting link", async () => {
+    const res = await post("/api/intake/meeting-invite", invite({ body: "<p>see you at the office</p>" }));
+    expect(res.json()).toEqual({ status: "ignored", reason: "no_meeting_link" });
+    expect(controller.calls.schedule).toHaveLength(0);
+  });
+
+  it("ignores updates once the interview is under way", async () => {
+    await store.save({ ...(await store.findById(interviewId))!, status: "in_meeting" });
+    const res = await post("/api/intake/meeting-invite", invite());
+    expect(res.json()).toEqual({ status: "ignored", reason: "interview_in_progress" });
+  });
+
+  it("returns 500 (so the Logic App retries) when the bot provider fails, and stores nothing", async () => {
+    controller.schedule = async () => {
+      throw new Error("recall is down");
+    };
+    const res = await post("/api/intake/meeting-invite", invite());
+    expect(res.statusCode).toBe(500);
+    expect((await store.findById(interviewId))?.status).toBe("paid");
   });
 
   it("paste-link fallback uses the same pipeline", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/intake/link",
-      headers: auth,
-      payload: { alias: "7KQ2", link: TEAMS },
-    });
+    const res = await post("/api/intake/link", { alias: "7KQ2", link: TEAMS });
     expect(res.json()).toMatchObject({ status: "scheduled", interviewId });
-    await vi.advanceTimersByTimeAsync(1);
-    expect(dispatcher.join).toHaveBeenCalledWith({ interviewId, joinUrl: TEAMS });
+    expect(controller.calls.schedule[0]).toMatchObject({ joinUrl: TEAMS, platform: "teams" });
   });
 
-  it("bot events drive interview status and forward segments", async () => {
-    const post = (payload: Record<string, unknown>) =>
-      app.inject({ method: "POST", url: "/api/bot/events", headers: auth, payload });
-
-    await post({ type: "lobby_waiting", interviewId });
-    expect((await store.findById(interviewId))?.status).toBe("joining");
-    await post({ type: "admitted", interviewId });
-    expect((await store.findById(interviewId))?.status).toBe("in_meeting");
-    await post({ type: "ended", interviewId, reason: "not_admitted" });
-    expect((await store.findById(interviewId))?.status).toBe("not_admitted");
-
-    const unknown = await post({ type: "admitted", interviewId: "nope" });
-    expect(unknown.statusCode).toBe(404);
-  });
-
-  it("passes tenantId and interviewerAadId to the bot (needed for short /meet/ links)", async () => {
-    const seeded = await app.inject({
-      method: "POST",
-      url: "/api/dev/interviews",
-      headers: auth,
-      payload: { alias: "TNT1", ownerEmail: "r@acme.com", tenantId: "tenant-123", interviewerAadId: "oid-456" },
-    });
-    const id = seeded.json().id;
-    const shortLink = "https://teams.microsoft.com/meet/123456789012?p=AbCdEf";
-    await app.inject({ method: "POST", url: "/api/intake/link", headers: auth, payload: { alias: "TNT1", link: shortLink } });
-    await vi.advanceTimersByTimeAsync(1);
-    expect(dispatcher.join).toHaveBeenCalledWith({
-      interviewId: id,
-      joinUrl: shortLink,
-      tenantId: "tenant-123",
-      interviewerAadId: "oid-456",
-    });
-  });
-
-  it("records the updateRecordingStatus outcome from the bot", async () => {
-    const post = (payload: Record<string, unknown>) =>
-      app.inject({ method: "POST", url: "/api/bot/events", headers: auth, payload });
-    await post({ type: "recording_status", interviewId, ok: false, detail: "403 not allowed" });
-    expect((await store.findById(interviewId))?.recording).toEqual({ ok: false, detail: "403 not allowed" });
-    await post({ type: "recording_status", interviewId, ok: true });
-    expect((await store.findById(interviewId))?.recording?.ok).toBe(true);
-  });
-
-  it("paste-link rejects non-Teams URLs", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/intake/link",
-      headers: auth,
-      payload: { alias: "7KQ2", link: "https://evil.example.com/meet/1?p=2" },
-    });
-    expect(res.json()).toEqual({ status: "ignored", reason: "no_join_url" });
+  it("paste-link rejects non-meeting URLs", async () => {
+    const res = await post("/api/intake/link", { alias: "7KQ2", link: "https://evil.example.com/meet/1?p=2" });
+    expect(res.json()).toEqual({ status: "ignored", reason: "no_meeting_link" });
   });
 });

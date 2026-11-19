@@ -1,10 +1,9 @@
 /**
- * Parses a meeting-invite email (as forwarded by the Logic App) into the data
- * the orchestrator needs: Teams join URL, which interview alias it was sent to,
- * and (from the ICS attachment, when present) the stable meeting UID, method
- * and start time.
+ * Parses a meeting-invite email (as forwarded by the Logic App) into the data the orchestrator needs: the meeting
+ * link (Teams, Zoom or Google Meet), which interview alias it was sent to, and (from the ICS attachment, when present)
+ * the stable meeting UID, method and start time.
  *
- * Email content is UNTRUSTED input: only strictly-matched Teams URLs are returned.
+ * Email content is UNTRUSTED input: only links whose host AND path match a known meeting format are returned.
  */
 
 export interface InviteAttachment {
@@ -27,13 +26,19 @@ export interface InviteEmail {
 }
 
 export type InviteMethod = "request" | "cancel";
+export type MeetingPlatform = "teams" | "zoom" | "meet";
+
+export interface MeetingLink {
+  url: string;
+  platform: MeetingPlatform;
+}
 
 export interface ParsedInvite {
-  joinUrl?: string;
+  meeting?: MeetingLink;
   /** alias tags found among recipients, e.g. "7KQ2" */
   aliasTags: string[];
   method: InviteMethod;
-  /** ICS UID — stable across updates/reschedules */
+  /** ICS UID, stable across updates/reschedules */
   icalUid?: string;
   /** ISO string, only when ICS DTSTART was UTC */
   startsAt?: string;
@@ -41,11 +46,8 @@ export interface ParsedInvite {
   from: string;
 }
 
-const ALLOWED_HOSTS = new Set(["teams.microsoft.com", "teams.live.com"]);
-
-// Matches https://teams.microsoft.com/l/meetup-join/..., /meet/<id>?p=..., teams.live.com/meet/...
-const TEAMS_URL_RE =
-  /https:\/\/(?:teams\.microsoft\.com|teams\.live\.com)\/(?:l\/meetup-join\/[^\s"'<>)]+|meet\/[^\s"'<>)]+)/gi;
+// Any https URL; each candidate is then validated strictly by host and path.
+const URL_RE = /https:\/\/[A-Za-z0-9.-]+(?::\d+)?\/[^\s"'<>)]*/g;
 
 const SAFELINK_RE = /https:\/\/[a-z0-9.-]*safelinks\.protection\.outlook\.com\/[^\s"'<>]*/gi;
 
@@ -57,29 +59,48 @@ function decodeHtmlEntities(s: string): string {
     .replace(/&quot;/gi, '"');
 }
 
-/** Unwrap Defender Safe Links so the real Teams URL is visible. */
+/** Unwrap Defender Safe Links so the real meeting URL is visible. */
 function unwrapSafeLinks(text: string): string {
   return text.replace(SAFELINK_RE, (m) => {
     try {
       const u = new URL(decodeHtmlEntities(m));
-      const inner = u.searchParams.get("url");
-      return inner ?? m;
+      return u.searchParams.get("url") ?? m;
     } catch {
       return m;
     }
   });
 }
 
-export function extractJoinUrl(body: string): string | undefined {
+/** Returns the platform if the URL is a real meeting join link, otherwise undefined. */
+export function classifyMeetingUrl(u: URL): MeetingPlatform | undefined {
+  if (u.protocol !== "https:" || u.port) return undefined;
+  const host = u.hostname.toLowerCase();
+  const path = u.pathname;
+
+  if (
+    (host === "teams.microsoft.com" && (path.startsWith("/l/meetup-join/") || /^\/meet\/\d+/.test(path))) ||
+    (host === "teams.live.com" && /^\/meet\/\d+/.test(path))
+  ) {
+    return "teams";
+  }
+  if ((host === "zoom.us" || host.endsWith(".zoom.us")) && /^\/(j|wc\/join)\/\d{9,12}/.test(path)) {
+    return "zoom";
+  }
+  if (host === "meet.google.com" && /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(path)) {
+    return "meet";
+  }
+  return undefined;
+}
+
+/** First valid meeting link in the text (HTML or plain), or undefined. */
+export function extractMeetingLink(body: string): MeetingLink | undefined {
   const text = unwrapSafeLinks(decodeHtmlEntities(body));
-  const matches = text.match(TEAMS_URL_RE);
-  if (!matches) return undefined;
-  for (const raw of matches) {
-    // trim trailing punctuation that regex may have swallowed
+  for (const raw of text.match(URL_RE) ?? []) {
     const cleaned = raw.replace(/[.,;]+$/, "");
     try {
       const u = new URL(cleaned);
-      if (u.protocol === "https:" && ALLOWED_HOSTS.has(u.hostname)) return u.toString();
+      const platform = classifyMeetingUrl(u);
+      if (platform) return { url: u.toString(), platform };
     } catch {
       /* ignore malformed */
     }
@@ -102,7 +123,7 @@ export function splitAddresses(list: string | undefined): string[] {
 /**
  * Supports both alias styles:
  *   iv-7KQ2@domain        (proxy alias)
- *   assistant+7KQ2@domain (plus addressing — verify it survives in the To header)
+ *   assistant+7KQ2@domain (plus addressing; verify it survives in the To header)
  */
 export function extractAliasTags(addresses: string[], aliasDomain: string): string[] {
   const tags = new Set<string>();
@@ -163,7 +184,7 @@ export function parseInvite(email: InviteEmail, aliasDomain: string): ParsedInvi
   const isCancel = ics.method === "CANCEL" || /^\s*(canceled|cancelled)\s*:/i.test(email.subject);
 
   return {
-    joinUrl: extractJoinUrl(email.body),
+    meeting: extractMeetingLink(email.body),
     aliasTags,
     method: isCancel ? "cancel" : "request",
     icalUid: ics.uid,

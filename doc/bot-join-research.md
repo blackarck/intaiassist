@@ -1,3 +1,5 @@
+> **Status (2026-11-19): superseded.** We built and ran the own-Teams-media-bot route (Option A). It joins meetings by link, but Graph refuses `updateRecordingStatus` for link-joined bots, so it cannot compliantly transcribe. The product now uses Recall.ai (Option B); see [recall-integration.md](recall-integration.md). The code is preserved at git tag `teams-media-bot-spike`. Everything below is kept as the record of that investigation.
+
 # Deliverable 1: Getting the Bot Into a Teams Interview (Research)
 
 _Researched 2026-11-18 against current Microsoft Learn docs. Re-check the items marked **Verify in spike** before committing._

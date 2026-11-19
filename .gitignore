@@ -14,5 +14,6 @@ local/
 # secrets, just in case
 .env
 .env.*
+!.env.example
 *.pfx
 *.pem

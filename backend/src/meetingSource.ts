@@ -1,18 +1,17 @@
 /**
- * Abstraction over "where does the live transcript come from?".
- * Lets us swap our own Graph media bot (Option A) for a vendor bot (Option B)
- * or Work IQ (Option C) without touching evaluation/coaching code.
- * See doc/bot-join-research.md.
+ * Events the meeting bot (Recall.ai) reports about an interview. Kept provider-neutral: the webhook layer maps
+ * Recall's payloads into these, and the rest of the system (status tracking, coaching) only sees these types.
  */
 export interface TranscriptSegment {
   interviewId: string;
-  /** Teams participant id / display name resolved from active-speaker ids */
+  /** Provider participant id */
   speakerId: string;
   speakerName?: string;
   role?: "interviewer" | "candidate" | "unknown";
   text: string;
+  /** false for partial (still-being-spoken) utterances */
   isFinal: boolean;
-  /** ms offset from join */
+  /** ms offset from the start of the recording */
   startMs: number;
   endMs?: number;
 }
@@ -20,13 +19,13 @@ export interface TranscriptSegment {
 export type MeetingEvent =
   | { type: "lobby_waiting"; interviewId: string }
   | { type: "admitted"; interviewId: string }
-  /** Outcome of Graph updateRecordingStatus. ok=false => no transcript will be produced (spike risk #1). */
+  /** Platform-level recording permission (Zoom reports denials). ok=false means no transcript will be produced. */
   | { type: "recording_status"; interviewId: string; ok: boolean; detail?: string }
   | { type: "segment"; segment: TranscriptSegment }
-  | { type: "ended"; interviewId: string; reason: "meeting_ended" | "removed" | "not_admitted" | "error" };
-
-export interface MeetingSource {
-  join(args: { interviewId: string; joinUrl: string }): Promise<void>;
-  leave(interviewId: string): Promise<void>;
-  onEvent(handler: (e: MeetingEvent) => void): void;
-}
+  | {
+      type: "ended";
+      interviewId: string;
+      reason: "meeting_ended" | "removed" | "not_admitted" | "error";
+      /** provider sub-code for diagnostics */
+      detail?: string;
+    };

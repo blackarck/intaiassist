@@ -41,4 +41,11 @@ Play a meeting without Recall through `POST /api/dev/interviews/:id/segments` an
 ## Not done yet
 
 Google sign-in (the backend verifier exists; the button does not), resume file upload (paste for now), payment, a read-only guest
-view, and deployment (Caddy serving `dist/` on `intassist.askproso.ai`).
+view, and billing.
+
+## Deploying
+
+`infra/azure/deploy-backend.sh` builds the committed `web/` with the public settings (`VITE_API_URL`, `VITE_MS_CLIENT_ID`; no dev
+user), ships it to the VM and Caddy serves it on `intassist.askproso.ai` (security headers + CSP in `deploy/Caddyfile`; unknown
+paths fall back to `index.html`; hashed assets cached for a year). The sign-in popup returns to `/redirect.html`, which must be a
+registered SPA redirect URI in the Entra app.

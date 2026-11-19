@@ -1,6 +1,6 @@
 # Live coaching: design
 
-Status: the AI layer (`backend/src/ai/`), the live room backend (`backend/src/room/`) and the web app (`web/`) are built and tested, and were exercised together locally with the real models (browser, simulated meeting). None of it is deployed. Microsoft login is not registered, Google login and billing are not built.
+Status: the AI layer (`backend/src/ai/`), the live room backend (`backend/src/room/`) and the web app (`web/`) are built and tested, and were exercised together locally with the real models (browser, simulated meeting). **Deployed 2026-11-19**: web app at https://intassist.askproso.ai, API at https://intassistback.askproso.ai (schema v5). Microsoft sign-in works (app registration "Interview Assist Web"); not yet exercised in a real Teams meeting. Google login and billing are not built.
 (An earlier draft routed the AI through AskProso's "headless task" API. Decision 2026-11-19: **Interview Assist calls the model
 providers itself**, for control of usage, latency and cost. AskProso is used only as the source of test API keys.)
 
@@ -23,9 +23,9 @@ The scores support the interviewer; the product never outputs hire / no-hire, an
 | Piece | Where |
 |---|---|
 | Bot lifecycle, e-mail intake, Recall webhooks, transcript store | `backend/` (working, deployed) |
-| AI tasks, model routing, failover, run log, admin settings API | `backend/src/ai/` (built, tested, **not deployed**) |
-| Turn detection, orchestration, live feed (SSE), persistence of questions/answers/scores | `backend/src/room/` (built, tested, **not deployed**) |
-| Login, setup, room, admin screens | `web/` (built, tested locally; **not deployed**; Microsoft login not registered yet) |
+| AI tasks, model routing, failover, run log, admin settings API | `backend/src/ai/` (deployed) |
+| Turn detection, orchestration, live feed (SSE), persistence of questions/answers/scores | `backend/src/room/` (deployed) |
+| Login, setup, room, admin screens | `web/` (deployed; Caddy serves the static build) |
 
 ## The AI layer (built)
 
@@ -72,9 +72,8 @@ GPT-5.4 nano/mini/full, GPT-5.6 luna/terra, GPT-6 luna/astra, GPT-6.1 sol, gpt-o
 Haiku/Sonnet/Opus 5.5. **Not deployed there:** deepseek-v4.1-flash, qwen3.8, microsoft-decision, mai-code-1.1. They can be added
 to the catalog (one line each) once deployed. Choice per task is by bake-off, not by guess (below).
 
-**Keys.** Test keys were copied from AskProso's `.env` into `backend/.env` (gitignored): `ANTHROPIC_API_KEY`,
-`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` (+ the `AZURE_SERVICES_*` pair, unused for now). For production they must go to
-Key Vault and into `deploy-backend.sh` like the other secrets, and ideally be a key owned by this product, not AskProso's.
+**Keys.** Test keys were copied from AskProso's `.env` into `backend/.env` (gitignored) and into Key Vault (`anthropic-api-key`, `azure-openai-endpoint`, `azure-openai-api-key`; the deploy script writes them to the VM): `ANTHROPIC_API_KEY`,
+`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` (+ the `AZURE_SERVICES_*` pair, unused for now). They are still AskProso's keys: replace them with keys owned by this product before real use.
 
 ## Bake-off
 
@@ -138,7 +137,7 @@ not); a read-only guest view; retention.
 3. **Injection**: answers that try to set their own score or reveal the prompt must not move the score.
 4. **Noisy transcripts**: realistic mis-hearings ("segments of facebook") must yield `confidence: low` and a note.
 
-## Login and access (built; Entra app not registered yet)
+## Login and access (deployed)
 
 The web app signs in with MSAL and sends the Microsoft **ID token** to the backend, which verifies it with Microsoft's published
 keys (`src/auth.ts`, audience = our client id, issuer shape + tenant check). A Google verifier exists too (needs a Google client id

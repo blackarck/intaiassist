@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Cheap, safe resources for the spike: resource group, Speech (pay-per-use), Key Vault.
-# No VM here; see provision-vm.sh (costs money while running).
+# Base resources: resource group + Key Vault (secrets). Hosting is created separately (see doc/hosting.md).
 #
 # Usage:  LOCATION=eastus ./provision.sh
 set -euo pipefail
@@ -18,13 +17,6 @@ echo
 az group create -n "$RG" -l "$LOCATION" --tags project=interview-assist -o none
 echo "OK resource group"
 
-# Azure AI Speech (S0 = pay as you go, no standing cost)
-SPEECH="${PREFIX}-speech"
-if ! az cognitiveservices account show -g "$RG" -n "$SPEECH" -o none 2>/dev/null; then
-  az cognitiveservices account create -g "$RG" -n "$SPEECH" --kind SpeechServices --sku S0 -l "$LOCATION" --yes -o none
-fi
-echo "OK speech: $SPEECH"
-
 # Key Vault (RBAC mode). Name must be globally unique, 3-24 chars.
 KV="${PREFIX}-kv-${SUB_ID:0:4}"
 if ! az keyvault show -g "$RG" -n "$KV" -o none 2>/dev/null; then
@@ -33,8 +25,4 @@ fi
 echo "OK key vault: $KV"
 
 echo
-echo "Next:"
-echo "  Speech key (do not paste it into chat or commit it):"
-echo "    az cognitiveservices account keys list -g $RG -n $SPEECH --query key1 -o tsv"
-echo "  Speech region for config: $LOCATION"
-echo "  Then follow doc/spike-runbook.md (Entra app, Azure Bot, VM)."
+echo "Next: store the Recall secrets in the vault (recall-api-key, recall-webhook-secret), then deploy the backend."

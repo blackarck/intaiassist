@@ -30,19 +30,30 @@ const problemScore = {
   dimensions: { technicalCorrectness: 2, depth: 2, clarity: 3, relevance: 3 },
   problems: [{ quote: "connection pool was exhausted", issue: "Does not say why the pool ran dry.", correction: "A long-held connection or leak; check active sessions.", severity: "major", counterQuestion: "How did you find out what was holding the connections?" }],
 };
-const followOut = { followUps: [{ text: "What did you change so it cannot happen again?", reason: "prevention not covered", kind: "probe" }] };
+const coachOut = {
+  stance: "partly_right",
+  remark: "Found the cause but did not say why the pool ran dry.",
+  questions: [
+    { text: "How did you find out what was holding the connections?", remark: "tests whether they diagnosed it themselves" },
+    { text: "What did you change so it cannot happen again?", remark: "prevention not covered" },
+  ],
+  proof: null,
+};
+/** Every prompt the coach was sent, in order (so tests can check what it was told). */
+const coachPrompts: string[] = [];
 const cardOut = { summary: "Solid on incidents.", strengths: ["root cause analysis"], risks: ["prevention"], followUpsNextRound: ["Design a load test"] };
 const assistOut = { suggestion: "Ask how the report query was found.", kind: "question", evidence: ["connection pool"] };
 const openingOut = { questions: [{ text: "How do you size a connection pool?", why: "core skill", keyPoints: ["limits"], probes: ["what if the DB is the bottleneck?"] }] };
 
 /** A model that recognises which task it was asked by its system prompt and answers with a scripted result. */
 function taskModels(over: Partial<Record<string, unknown | Error>> = {}): ModelFactory {
-  const table: Record<string, unknown> = { score: scoreOut, follow: followOut, card: cardOut, assist: assistOut, opening: openingOut, ...over };
+  const table: Record<string, unknown> = { score: scoreOut, coach: coachOut, card: cardOut, assist: assistOut, opening: openingOut, ...over };
   return () =>
     new MockLanguageModelV4({
       doGenerate: async (opts) => {
         const sys = JSON.stringify(opts.prompt.find((m) => m.role === "system") ?? "");
-        const which = sys.includes("assess one interview answer") ? "score" : sys.includes("follow-up questions") ? "follow" : sys.includes("Summarise an interview") ? "card" : sys.includes("assist me") ? "assist" : "opening";
+        if (sys.includes("AS THEY ANSWER")) coachPrompts.push(JSON.stringify(opts.prompt.filter((m) => m.role === "user")));
+        const which = sys.includes("assess one interview answer") ? "score" : sys.includes("AS THEY ANSWER") ? "coach" : sys.includes("Summarise an interview") ? "card" : sys.includes("assist me") ? "assist" : "opening";
         const v = table[which];
         if (v instanceof Error) throw Object.assign(v, { statusCode: 503 });
         return { content: [{ type: "text", text: JSON.stringify(v) }], finishReason: { unified: "stop", raw: "stop" }, usage: { inputTokens: { total: 10 }, outputTokens: { total: 5 } }, warnings: [] } as never;
@@ -54,14 +65,15 @@ let clock = 1_000_000;
 let ids = 0;
 const seg = (role: "interviewer" | "candidate", text: string, startMs: number): TranscriptSegment => ({ interviewId: "i-1", speakerId: role === "interviewer" ? "1" : "2", speakerName: role === "interviewer" ? "Vivek" : "Asha", role, text, isFinal: true, startMs, endMs: startMs + 3000 });
 
-async function setup(models: ModelFactory = taskModels()) {
+async function setup(models: ModelFactory = taskModels(), extra: { silenceMs?: number } = {}) {
+  coachPrompts.length = 0;
   clock = 1_000_000;
   ids = 0;
   const interviews = new InMemoryStore();
   await interviews.save({ id: "i-1", alias: "K7M2QX9WPB", ownerEmail: "r@acme.com", status: "in_meeting" });
   const rooms = new InMemoryRoomStore();
   const aiStore = new InMemoryAiStore();
-  const room = new RoomService({ rooms, transcripts: interviews, interviews, ai: { config: aiStore, log: aiStore, models }, now: () => clock, newId: () => `id${++ids}`, silenceMs: 2500 });
+  const room = new RoomService({ rooms, transcripts: interviews, interviews, ai: { config: aiStore, log: aiStore, models }, now: () => clock, newId: () => `id${++ids}`, silenceMs: extra.silenceMs ?? 2500 });
   const events: RoomEvent[] = [];
   room.bus.subscribe("i-1", (e) => events.push(e));
   const say = async (s: TranscriptSegment, advance = 100) => {
@@ -81,7 +93,7 @@ describe("RoomService: a full interview", () => {
   });
   const types = () => t.events.map((e) => e.type);
 
-  it("shows preset questions, then turns speech into an answer with follow-ups and a score", async () => {
+  it("shows preset questions, then turns speech into an answer with live coaching and a score", async () => {
     expect(t.events[0]).toMatchObject({ type: "questions", data: { reason: "setup" } });
 
     await t.say(seg("interviewer", "Tell me about a production incident you handled", 0));
@@ -95,86 +107,89 @@ describe("RoomService: a full interview", () => {
     expect(snap.questions.filter((q) => q.kind === "live")).toHaveLength(0);
     expect(snap.answers).toHaveLength(1);
     expect(snap.answers[0]).toMatchObject({ state: "closed", version: 1, score: { version: 1, output: { score: 4, confidence: "high" }, model: expect.any(String) } });
-    expect(snap.questions.filter((q) => q.kind === "follow_up").map((q) => q.text)).toEqual(["What did you change so it cannot happen again?"]);
+    expect(snap.coach).toMatchObject({ answerId: snap.answers[0]!.id, stance: "partly_right", questions: [{ text: "How did you find out what was holding the connections?" }, { text: "What did you change so it cannot happen again?" }] });
     expect(snap.transcript.map((x) => x.role)).toEqual(["interviewer", "candidate"]);
-    expect(types()).toEqual(expect.arrayContaining(["segment", "answer", "questions", "score"]));
+    expect(types()).toEqual(expect.arrayContaining(["segment", "answer", "questions", "coach", "score"]));
     // events are numbered in increasing order
     const seqs = t.events.map((e) => e.seq!).filter(Boolean);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
   });
 
-  it("turns the problems found in an answer into pointed counter-questions that replace the generic follow-ups", async () => {
-    const t2 = await setup(taskModels({ score: problemScore }));
-    await t2.say(seg("interviewer", "Tell me about a production incident you handled", 0));
-    await t2.say(seg("candidate", ANSWER, 5000));
-    clock += 3000;
-    t2.room.tickAll();
-    await t2.room.idle("i-1");
-    const snap = await t2.room.snapshot("i-1");
-    const followUps = snap.questions.filter((q) => q.kind === "follow_up");
-    expect(followUps).toHaveLength(1); // the fast, generic one is gone whichever finished first
-    expect(followUps[0]).toMatchObject({ text: "How did you find out what was holding the connections?", why: "Does not say why the pool ran dry.", source: "score", aboutQuote: "connection pool was exhausted", followKind: "probe", keyPoints: ["A long-held connection or leak; check active sessions."] });
-    expect(snap.answers[0]!.score?.output.problems[0]).toMatchObject({ quote: "connection pool was exhausted", severity: "major" });
+  it("coaches WHILE the candidate is still talking, and only once enough has been said", async () => {
+    await t.say(seg("interviewer", "Tell me about a production incident you handled", 0));
+    await t.say(seg("candidate", "Our payments service started timing out", 5000)); // 6 words: too early to say anything
+    expect(coachPrompts).toHaveLength(0);
+    await t.say(seg("candidate", "because the connection pool was exhausted by a long report query", 8000)); // 18 words in total
+    expect(coachPrompts).toHaveLength(1);
+    const first = t.events.find((e) => e.type === "coach")!;
+    expect(first.data).toMatchObject({ stance: "partly_right", questions: [{ remark: "tests whether they diagnosed it themselves" }, expect.anything()], proof: null });
+    expect((await t.room.snapshot("i-1")).answers[0]!.state).toBe("open"); // still the same open answer: nothing was closed or scored
+    expect(types()).not.toContain("score");
   });
 
-  it("adds a 'prove you did the work' question when the answer sounds generic, after the questions about what was wrong", async () => {
-    const generic = { ...problemScore, experience: { signal: "generic", evidence: "textbook phrasing, no detail of their own", probe: "What exactly did you change yourself, and what number moved?" } };
-    const t2 = await setup(taskModels({ score: generic }));
-    await t2.say(seg("interviewer", "Tell me about a production incident you handled", 0));
-    await t2.say(seg("candidate", ANSWER, 5000));
+  it("refreshes after a pause or after plenty of new speech, tells the coach what is on screen, and not more often than needed", async () => {
+    const t = await setup(taskModels(), { silenceMs: 20_000 }); // the real setting: a pause is not the end of an answer
+    await t.say(seg("interviewer", "Tell me about a production incident you handled", 0));
+    await t.say(seg("candidate", ANSWER, 5000)); // first coaching
+    expect(coachPrompts).toHaveLength(1);
+
+    clock += 1000;
+    await t.say(seg("candidate", "we then added a statement timeout", 9000)); // 5 new words, no pause: nothing
+    t.room.tickAll();
+    await t.room.idle("i-1");
+    expect(coachPrompts).toHaveLength(1);
+
+    clock += 5000; // now the candidate has paused for 5 s with enough new words
+    t.room.tickAll();
+    await t.room.idle("i-1");
+    expect(coachPrompts).toHaveLength(1); // 5 new words is below the pause threshold of 8
+
+    await t.say(seg("candidate", "and moved the reporting query onto a read replica so it could not starve the main pool again", 16_000));
     clock += 3000;
-    t2.room.tickAll();
-    await t2.room.idle("i-1");
-    const qs = (await t2.room.snapshot("i-1")).questions.filter((q) => q.kind === "follow_up");
-    expect(qs.map((q) => q.text)).toEqual(["How did you find out what was holding the connections?", "What exactly did you change yourself, and what number moved?"]);
-    expect(qs[1]).toMatchObject({ why: "Check they did the work: textbook phrasing, no detail of their own", source: "score" });
+    t.room.tickAll();
+    await t.room.idle("i-1");
+    expect(coachPrompts).toHaveLength(2);
+    expect(coachPrompts[1]).toContain("shown_a_moment_ago"); // the second call was told what the first one showed
+    expect(coachPrompts[1]).toContain("How did you find out what was holding the connections?");
+    expect(t.events.filter((e) => e.type === "coach")).toHaveLength(2);
   });
 
-  it("offers a suggestion on its own when the interviewer stays quiet after an answer, once, and not if they carry on", async () => {
-    const t2 = await setup();
-    await t2.room.configure({ interviewId: "i-1", roleTitle: "Backend", jd: "x", presetQuestions: [] });
+  it("carries the 'prove you did the work' question when the coach asks for it", async () => {
+    const t2 = await setup(taskModels({ coach: { ...coachOut, proof: { text: "What exactly did you change yourself?", remark: "answer sounded textbook" } } }));
     await t2.say(seg("interviewer", "Tell me about a production incident you handled", 0));
     await t2.say(seg("candidate", ANSWER, 5000));
-    clock += 3000;
-    t2.room.tickAll(); // answer closes
-    await t2.room.idle("i-1");
-    clock += 5000;
-    t2.room.tickAll();
-    await t2.room.idle("i-1");
-    expect(t2.events.some((e) => e.type === "assist")).toBe(false); // 5 s of quiet is normal
-    clock += 6000;
-    t2.room.tickAll();
-    await t2.room.idle("i-1");
-    expect(t2.events.filter((e) => e.type === "assist").map((e) => (e.data as { auto?: boolean }).auto)).toEqual([true]);
-    clock += 60_000;
-    t2.room.tickAll();
-    await t2.room.idle("i-1");
-    expect(t2.events.filter((e) => e.type === "assist")).toHaveLength(1); // not repeated
-
-    // when the interviewer has already asked the next question, nothing is offered
-    await t2.say(seg("interviewer", "Next, how do you size a connection pool", 90_000));
-    await t2.say(seg("candidate", "I start from the database connection limit divided by the number of instances", 95_000));
-    clock += 3000;
-    t2.room.tickAll();
-    await t2.room.idle("i-1");
-    await t2.say(seg("interviewer", "Good and what about when traffic doubles suddenly", 110_000));
-    clock += 60_000;
-    t2.room.tickAll();
-    await t2.room.idle("i-1");
-    expect(t2.events.filter((e) => e.type === "assist")).toHaveLength(1);
+    const c = t2.events.find((e) => e.type === "coach")!.data as { proof: { text: string } };
+    expect(c.proof.text).toBe("What exactly did you change yourself?");
   });
 
-  it("a failed automatic suggestion stays silent (no error banner for something nobody asked for)", async () => {
-    const t2 = await setup(taskModels({ assist: new Error("down") }));
-    await t2.say(seg("interviewer", "Tell me about a production incident you handled", 0));
-    await t2.say(seg("candidate", ANSWER, 5000));
-    clock += 3000;
-    t2.room.tickAll();
+  it("only one coaching call runs at a time per interview; speech that arrives meanwhile is covered by the next one", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let coachCalls = 0;
+    const slow: ModelFactory = (spec) => {
+      const inner = taskModels()(spec) as MockLanguageModelV4;
+      const orig = inner.doGenerate as (o: never) => Promise<never>;
+      inner.doGenerate = (async (o: never) => {
+        if (JSON.stringify(o).includes("AS THEY ANSWER")) {
+          coachCalls++;
+          await gate;
+        }
+        return orig(o);
+      }) as never;
+      return inner;
+    };
+    const t2 = await setup(slow, { silenceMs: 20_000 });
+    await t2.interviews.appendSegment(seg("interviewer", "Tell me about a production incident you handled", 0));
+    t2.room.onSegment(seg("interviewer", "Tell me about a production incident you handled", 0));
+    t2.room.onSegment(seg("candidate", ANSWER, 5000)); // starts the first (blocked) coaching call
+    await new Promise((r) => setTimeout(r, 20));
+    clock += 9000;
+    t2.room.onSegment(seg("candidate", "and afterwards we put alerts on pool usage and moved the report to a replica for good measure then wrote a runbook for the on call team and ran a game day to practise the same failure with the new alerts in place", 14_000));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(coachCalls).toBe(1); // the second is waiting, not racing
+    release();
     await t2.room.idle("i-1");
-    clock += 11_000;
-    t2.room.tickAll();
-    await t2.room.idle("i-1");
-    expect(t2.events.some((e) => e.type === "ai_error" && (e.data as { task: string }).task === "assist")).toBe(false);
+    expect(coachCalls).toBe(2);
   });
 
   it("keeps a question that was not on the list as a 'live' one", async () => {
@@ -208,8 +223,6 @@ describe("RoomService: a full interview", () => {
     const scores = (await t.rooms.listScores("i-1")).map((s) => s.version);
     expect(scores).toEqual([1, 2]);
     expect((await t.room.snapshot("i-1")).answers[0]!.score?.version).toBe(2);
-    // the older follow-up suggestion for this answer was replaced, not duplicated
-    expect((await t.rooms.listQuestions("i-1")).filter((q) => q.kind === "follow_up")).toHaveLength(1);
   });
 
   it("closes the last answer when the meeting ends, waits for scoring, then emits the scorecard", async () => {
@@ -260,7 +273,7 @@ describe("RoomService: failures stay out of the meeting", () => {
     t.room.tickAll();
     await t.room.idle("i-1");
     expect(t.events.find((e) => e.type === "ai_error")?.data).toMatchObject({ task: "score_answer", code: "outage" });
-    expect(t.events.some((e) => e.type === "questions" && (e.data as { reason: string }).reason === "follow_up")).toBe(true); // follow-ups still worked
+    expect(t.events.some((e) => e.type === "coach")).toBe(true); // live coaching still worked
     expect((await t.room.snapshot("i-1")).answers[0]!.score).toBeNull();
   });
 });

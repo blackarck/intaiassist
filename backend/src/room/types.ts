@@ -69,7 +69,7 @@ export interface RoomScore {
   at: string;
 }
 
-export type RoomEventType = "segment" | "status" | "answer" | "questions" | "score" | "assist" | "scorecard" | "ai_error";
+export type RoomEventType = "segment" | "status" | "answer" | "questions" | "score" | "assist" | "coach" | "scorecard" | "ai_error";
 
 export interface RoomEvent {
   /** Per-interview, increasing. Absent on transient events (partial transcript) that are not replayed. */

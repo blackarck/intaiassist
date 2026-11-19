@@ -1,92 +1,82 @@
-import { useState } from "react";
-import { coachView, type RoomState } from "../room";
-import type { Problem, Question, ScoreOutput } from "../types";
-import { ScoreBadge } from "./Score";
-import { CopyButton, unquote } from "./ui";
+import { useEffect, useState } from "react";
+import type { RoomState } from "../room";
+import type { CoachData, Suggestion } from "../types";
+import { CopyButton } from "./ui";
 
-const SIGNAL: Record<ScoreOutput["experience"]["signal"], { label: string; cls: string }> = {
-  first_hand: { label: "Sounds first-hand", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" },
-  unclear: { label: "Experience unclear", cls: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300" },
-  generic: { label: "Sounds textbook, not first-hand", cls: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" },
+const STANCE: Record<CoachData["stance"], { label: string; cls: string; ring: string }> = {
+  right: { label: "Answer is right so far", cls: "bg-emerald-600 text-white", ring: "border-emerald-300 dark:border-emerald-900" },
+  partly_right: { label: "Partly right", cls: "bg-amber-500 text-white", ring: "border-amber-300 dark:border-amber-900" },
+  wrong: { label: "Answer looks wrong", cls: "bg-red-600 text-white", ring: "border-red-300 dark:border-red-900" },
+  vague: { label: "Too vague so far", cls: "bg-zinc-600 text-white", ring: "border-zinc-300 dark:border-zinc-700" },
 };
 
 /**
- * The live coach: sits above everything, reads at a glance, and updates on its own after every answer.
- * It says in plain words what was wrong and gives the next question to ask, so the interviewer never has to press anything.
+ * The one thing the interviewer looks at: how the answer stands, and 2 or 3 questions to ask next, each with a few words on why.
+ * It refreshes by itself while the candidate talks. It never clears while waiting: the last suggestions stay until new ones replace
+ * them, and the layout does not change size, so nothing jumps.
  */
 export function Coach({ state }: { state: RoomState }) {
-  const v = coachView(state);
-  const [more, setMore] = useState(false);
+  const c = state.coach;
+  const latest = state.answers.at(-1);
+  const stale = !!c && !!latest && c.answerId !== latest.id; // a newer question has started; the new advice is still building up
+  const age = useAge(c?.at);
 
-  if (v.phase === "idle") return <Shell tone="idle"><p className="text-sm muted">Coach is listening. After each answer it will say what was wrong and what to ask next.</p></Shell>;
-  if (v.phase === "listening") return <Shell tone="idle"><p className="text-sm"><span className="font-medium">Listening to the answer…</span> <span className="muted">{v.question}</span></p></Shell>;
-  if (v.phase === "short") return <Shell tone="idle"><p className="text-sm muted">Short reply to “{v.question}”. Nothing to assess yet.</p></Shell>;
-  if (v.phase === "assessing") return <Shell tone="busy"><p className="flex items-center gap-2 text-sm"><span className="size-3 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-600" /> Assessing the answer to “{v.question}”…</p></Shell>;
-
-  const o = v.score.output;
-  const problems = o.problems;
-  const shown = more ? problems : problems.slice(0, 1);
-  const sig = SIGNAL[o.experience.signal];
-  const tone = o.score <= 2 ? "bad" : o.score === 3 ? "warn" : "good";
-  const ask = v.ask.slice(0, 3);
-
+  if (!c) {
+    return (
+      <Frame ring="border-zinc-200 dark:border-zinc-800">
+        <p className="text-base font-medium">{latest ? "Listening to the answer…" : "Listening."}</p>
+        <p className="mt-1 text-sm muted">Suggested questions appear here as soon as the candidate has said enough, and refresh while they keep talking.</p>
+      </Frame>
+    );
+  }
+  const st = STANCE[c.stance];
   return (
-    <Shell tone={tone}>
-      <div className="flex items-start gap-4">
-        <ScoreBadge score={o.score} size="lg" />
-        <div className="min-w-0 flex-1 space-y-3">
-          <div>
-            <p className="text-xs muted">Answer to: {v.answer.questionText}</p>
-            <p className="mt-1 text-base font-medium leading-snug">{o.verdict}</p>
-            <p className="mt-2"><span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${sig.cls}`}>{sig.label}</span> {o.experience.signal !== "first_hand" && <span className="text-xs muted">{o.experience.evidence}</span>}</p>
-          </div>
-
-          {ask.length > 0 && (
-            <div aria-label="Ask next" className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Ask next</h3>
-              {ask.map((q, i) => <AskRow key={q.id} q={q} primary={i === 0} />)}
-            </div>
-          )}
-          {shown.length > 0 && (
-            <ul className="space-y-2" aria-label="What was wrong">
-              {shown.map((p, i) => <ProblemRow key={i} p={p} />)}
-            </ul>
-          )}
-          {problems.length > 1 && <button type="button" className="text-xs text-indigo-600 hover:underline dark:text-indigo-400" onClick={() => setMore(!more)}>{more ? "Show fewer problems" : `Show ${problems.length - 1} more problem${problems.length - 1 > 1 ? "s" : ""}`}</button>}
-
-        </div>
+    <Frame ring={st.ring} dim={stale}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full px-3 py-1 text-sm font-semibold ${st.cls}`}>{st.label}</span>
+        <span className="ml-auto text-xs muted" aria-live="off">{stale ? "from the previous answer" : age}</span>
       </div>
-      {v.suggestion && (
-        <p className="mt-3 border-t border-zinc-200 pt-3 text-sm dark:border-zinc-800"><span className="text-xs font-semibold uppercase tracking-wide muted">{v.suggestion.auto ? "Suggestion" : "You asked for help"}</span><br />{v.suggestion.suggestion}</p>
+      <p className="mt-3 text-base leading-snug">{c.remark}</p>
+
+      <h2 className="mt-5 text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">{c.stance === "right" ? "You could also ask" : "Ask next"}</h2>
+      <ol className="mt-2 space-y-2.5">
+        {c.questions.map((q, i) => <Ask key={q.text} s={q} primary={i === 0} />)}
+      </ol>
+      {c.proof && (
+        <div className="mt-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-red-700 dark:text-red-400">Check they did the work</h2>
+          <ol className="mt-2"><Ask s={c.proof} primary={false} /></ol>
+        </div>
       )}
-    </Shell>
+    </Frame>
   );
 }
 
-function ProblemRow({ p }: { p: Problem }) {
+function Ask({ s, primary }: { s: Suggestion; primary: boolean }) {
   return (
-    <li className="rounded-lg bg-white/60 p-3 text-sm dark:bg-black/20">
-      <p><span className={`mr-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase ${p.severity === "major" ? "bg-red-600 text-white" : "bg-amber-500 text-white"}`}>{p.severity}</span><span className="italic">“{unquote(p.quote)}”</span></p>
-      <p className="mt-1"><span className="font-medium">Problem:</span> {p.issue}</p>
-      <p className="mt-0.5 muted"><span className="font-medium">Correct:</span> {p.correction}</p>
+    <li className={`flex items-start gap-3 rounded-xl border p-3.5 ${primary ? "border-indigo-300 bg-indigo-50 dark:border-indigo-800 dark:bg-indigo-950/40" : "border-zinc-200 dark:border-zinc-800"}`}>
+      <div className="min-w-0 flex-1">
+        <p className={primary ? "text-lg font-medium leading-snug" : "text-base leading-snug"}>{s.text}</p>
+        <p className="mt-1 text-xs muted">{s.remark}</p>
+      </div>
+      <CopyButton text={s.text} />
     </li>
   );
 }
 
-function AskRow({ q, primary }: { q: Question; primary: boolean }) {
-  const proof = q.why?.startsWith("Check they did the work");
-  return (
-    <div className={`flex items-start gap-2 rounded-lg border p-3 ${primary ? "border-indigo-300 bg-indigo-50 dark:border-indigo-800 dark:bg-indigo-950/40" : "border-zinc-200 dark:border-zinc-800"}`}>
-      <div className="min-w-0 flex-1">
-        {proof && <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-400">Check they did the work</p>}
-        <p className={primary ? "text-base font-medium leading-snug" : "text-sm leading-snug"}>{q.text}</p>
-      </div>
-      <CopyButton text={q.text} />
-    </div>
-  );
+function Frame({ children, ring, dim }: { children: React.ReactNode; ring: string; dim?: boolean }) {
+  // min height keeps the panel from collapsing and re-expanding as suggestions come and go
+  return <section aria-label="Coach" aria-live="polite" className={`card min-h-72 border-2 p-5 transition-opacity duration-500 ${ring} ${dim ? "opacity-60" : ""}`}>{children}</section>;
 }
 
-function Shell({ tone, children }: { tone: "idle" | "busy" | "good" | "warn" | "bad"; children: React.ReactNode }) {
-  const cls = { idle: "border-zinc-200 dark:border-zinc-800", busy: "border-indigo-200 dark:border-indigo-900", good: "border-emerald-300 dark:border-emerald-900", warn: "border-amber-300 dark:border-amber-900", bad: "border-red-300 dark:border-red-900" }[tone];
-  return <section aria-label="Coach" aria-live="polite" className={`card border-2 p-4 ${cls}`}>{children}</section>;
+/** "just now", "12 s ago", "1 min ago": re-rendered every few seconds, nothing else on the page moves with it. */
+function useAge(iso?: string) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
+  if (!iso) return "";
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  return s < 8 ? "updated just now" : s < 60 ? `updated ${s} s ago` : `updated ${Math.round(s / 60)} min ago`;
 }

@@ -103,17 +103,22 @@ after 2.5 s of candidate silence, or at the end. If the candidate resumes within
 answer reopens and is re-scored as a new version (older follow-ups for it are replaced). Speech from people with an unknown role is
 ignored for turns. A question that matches a queued preset/generated one marks it asked; otherwise it is recorded as a `live` question.
 
-**The coach takes charge (nobody presses anything).** The interviewer is busy, so the room drives itself:
-- When an answer ends, the **Coach panel** (pinned above everything) shows a written verdict, the score, and **Ask next**: pointed
-  counter-questions, each tied to the candidate's own words. Under it, the **problems**: exact quote, what is wrong, what a correct
-  answer says, major or minor.
-- It also judges whether the answer **sounds like work the candidate really did** (first-hand / unclear / textbook), comparing with
-  the resume, and adds a **"Check they did the work"** question that asks for specifics: what exactly did *you* do, which number
-  moved, what went wrong first.
-- If the candidate has finished and the interviewer says nothing for 10 s, the coach offers a **suggestion on its own** (a failed
-  automatic suggestion stays silent; only a button press shows an error).
-- Order of questions after an answer: quick generic follow-ups appear within about 2 s; when the score arrives (about 5-8 s) they
-  are replaced by the sharper ones derived from the problems. A candidate who carries on gets re-scored and the questions replaced again.
+**The live coach (nobody presses anything).** Found in the first real two-person interview: the screen moved too fast, answers were
+chopped into pieces, and the interviewer's murmurs became "questions". So:
+- **One panel is the screen.** The coach shows a stance chip (right so far / partly right / looks wrong / too vague), one plain
+  sentence, and **2 or 3 questions to ask next, each with a few words on why** ("You could also ask" when the answer is right).
+  Sometimes a "Check they did the work" question when the answer sounds secondhand. The transcript sits beside it; scores, the
+  scorecard and the prepared questions are tucked into collapsible sections below. The panel keeps a fixed minimum height, never
+  clears while waiting, and dims (instead of vanishing) when a new question has started and fresh advice is still building up.
+- **It listens while the candidate talks.** Once they have said 15 words it refreshes after 25 new words (at most every 8 s) or after
+  a 2.5 s pause with 8 new words. One refresh at a time per interview; speech that arrives meanwhile is picked up by the next one.
+  The previous questions are passed back to the model so it keeps what still fits and replaces what the candidate has since
+  answered: the screen stays steady but not stale. The `live_coach` task (fast model, about 2-3 s) replaces `next_questions`.
+- **Answers are whole answers.** An answer lasts until the interviewer asks something substantive or the candidate is quiet for
+  20 s (a pause to think is not the end). Interviewer fragments of three words or fewer during an answer ("is wrong answer",
+  "for that") are ignored, so speech-to-text chopping and murmuring no longer create new questions. Scoring still happens in the
+  background when the answer ends and feeds the collapsed "Scores" section.
+- A failed refresh keeps the last suggestions on screen and says so only once per answer.
 
 **Routes** (operator bearer token for now):
 
@@ -127,7 +132,7 @@ ignored for turns. A question that matches a queued preset/generated one marks i
 | `GET /api/interviews/:id/live` | Server-Sent Events; send `Last-Event-ID` (or `?after=`) to resume |
 
 **Events** (`id: <seq>` for stored ones): `segment` (partials are live-only, never stored), `status`, `answer`, `questions`
-(`reason`: setup / opening / asked / follow_up, with `removedIds`), `score` (higher `version` replaces lower), `assist`, `scorecard`,
+(`reason`: setup / opening / asked / follow_up, with `removedIds`), `score` (higher `version` replaces lower), `assist`, `coach`, `scorecard`,
 `ai_error`. A client draws from the snapshot, then opens the stream with `Last-Event-ID = lastSeq`.
 
 **Smoke test with the real models** (`test/room.live.test.ts`, `LIVE_AI=1`): a strong answer scored 3 (Sonnet is strict at "senior"),

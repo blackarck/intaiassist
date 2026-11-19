@@ -6,7 +6,10 @@ import { InMemoryStore } from "../src/store.js";
 import { fakeController } from "./helpers.js";
 
 const nextQ = {
-  followUps: [{ text: "What would you monitor to catch it earlier?", reason: "prevention was not covered", kind: "probe" }],
+  stance: "partly_right",
+  remark: "Cause found, prevention missing.",
+  questions: [{ text: "What would you monitor to catch it earlier?", remark: "prevention was not covered" }, { text: "How did you confirm the cause?", remark: "tests diagnosis" }],
+  proof: null,
 };
 
 describe("admin AI routes", () => {
@@ -38,7 +41,7 @@ describe("admin AI routes", () => {
   it("lists the model catalog and each task's effective settings", async () => {
     const body = (await call("GET", "/api/admin/ai/config")).json();
     expect(body.models.length).toBeGreaterThan(5);
-    expect(Object.keys(body.tasks).sort()).toEqual(["assist", "next_questions", "opening_questions", "score_answer", "scorecard"]);
+    expect(Object.keys(body.tasks).sort()).toEqual(["assist", "live_coach", "opening_questions", "score_answer", "scorecard"]);
     expect(body.tasks.score_answer).toMatchObject({ enabled: true, primary: "anthropic:sonnet" });
   });
 
@@ -55,13 +58,13 @@ describe("admin AI routes", () => {
   });
 
   it("Test runs a task on its sample, records the run, and a switched-off task refuses", async () => {
-    const ok = (await call("POST", "/api/admin/ai/test/next_questions")).json();
+    const ok = (await call("POST", "/api/admin/ai/test/live_coach")).json();
     expect(ok).toMatchObject({ ok: true, output: nextQ });
     const runs = (await call("GET", "/api/admin/ai/runs")).json().runs;
-    expect(runs[0]).toMatchObject({ task: "next_questions", interviewId: "admin-test", ok: true, inputTokens: 50 });
+    expect(runs[0]).toMatchObject({ task: "live_coach", interviewId: "admin-test", ok: true, inputTokens: 50 });
 
-    await call("PUT", "/api/admin/ai/config/next_questions", { enabled: false });
-    expect((await call("POST", "/api/admin/ai/test/next_questions")).json()).toMatchObject({ ok: false, error: { code: "disabled" } });
+    await call("PUT", "/api/admin/ai/config/live_coach", { enabled: false });
+    expect((await call("POST", "/api/admin/ai/test/live_coach")).json()).toMatchObject({ ok: false, error: { code: "disabled" } });
   });
 
   it("answers 501 when AI is not configured", async () => {

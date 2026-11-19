@@ -6,13 +6,10 @@ import { Coach } from "./Coach";
 import { AnswerCard, ScoreBadge } from "./Score";
 import { CopyButton, ErrorNote, Spinner, StatusBadge, clock, unquote } from "./ui";
 
-const FOLLOW: Record<string, string> = { probe: "Probe", clarify: "Clarify", deepen: "Go deeper", move_on: "Move on" };
-
 export function Room({ id, status, onStatus }: { id: string; status: string; onStatus?: (s: string) => void }) {
   const { state, connection, error } = useRoom(id);
   const [assisting, setAssisting] = useState(false);
   const [assistError, setAssistError] = useState<string>();
-  const [tab, setTab] = useState<"questions" | "transcript" | "assessment">("transcript");
 
   const live = state.status ?? status;
   useEffect(() => onStatus?.(live), [live]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -31,76 +28,58 @@ export function Room({ id, status, onStatus }: { id: string; status: string; onS
   if (error) return <ErrorNote>{error}</ErrorNote>;
   if (!state.loaded) return <Spinner label="Opening the room…" />;
 
-  // Suggestions for the answer just given are the ones to use now; older ones stay available but out of the way.
-  // The coach panel above carries the follow-ups for the answer just given; older ones stay available here.
-  const lastAnswerId = state.answers.at(-1)?.id;
-  const olderFollowUps = state.questions.filter((q) => q.kind === "follow_up" && q.status === "queued" && q.answerId !== lastAnswerId);
   const upNext = state.questions.filter((q) => q.kind !== "follow_up" && q.kind !== "live" && q.status === "queued");
   const asked = state.questions.filter((q) => q.status === "asked");
+  const finished = [...state.answers].filter((a) => a.state === "closed").reverse();
+  // Only a suggestion asked for AFTER the coach's latest one is worth showing next to it.
+  const help = state.assists[0] && (!state.coach || state.assists[0].at >= state.coach.at) ? state.assists[0] : undefined;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <StatusBadge status={live} />
         <span className="flex items-center gap-1.5 muted" role="status">
           <span className={`size-2 rounded-full ${connection === "live" ? "bg-emerald-500" : "animate-pulse bg-amber-500"}`} />
           {connection === "live" ? "Connected" : "Reconnecting…"}
         </span>
-        <button type="button" className="btn-primary ml-auto" onClick={askAssist} disabled={assisting || state.transcript.length === 0}>
-          {assisting ? "Thinking…" : "Assist me"}
-        </button>
+        <button type="button" className="btn-ghost ml-auto" onClick={askAssist} disabled={assisting || state.transcript.length === 0}>{assisting ? "Thinking…" : "Need another idea?"}</button>
       </div>
-
-      {state.notices[0] && <ErrorNote>{state.notices[0].text}</ErrorNote>}
       {assistError && <ErrorNote>{assistError}</ErrorNote>}
-      <Coach state={state} />
-      {state.scorecard && <ScorecardView card={state.scorecard} />}
+      {state.notices[0] && <p className="text-xs muted" role="status">{state.notices[0].text}</p>}
 
-      <div className="flex gap-1 lg:hidden" role="tablist">
-        {(["questions", "transcript", "assessment"] as const).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`btn flex-1 capitalize ${tab === t ? "bg-indigo-600 text-white" : "btn-ghost"}`}>{t}</button>
-        ))}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)]">
-        <section aria-label="Questions" className={`space-y-3 ${tab === "questions" ? "" : "hidden lg:block"}`}>
-          <h2 className="text-sm font-semibold">Questions</h2>
-          <div className="space-y-2">
-            <h3 className="text-xs font-medium uppercase tracking-wide muted">Up next</h3>
-            {upNext.length === 0 ? <p className="text-sm muted">No prepared questions left.</p> : upNext.map((q) => <QuestionCard key={q.id} q={q} />)}
-          </div>
-          {olderFollowUps.length > 0 && (
-            <details className="text-sm">
-              <summary className="cursor-pointer muted">Earlier follow-up ideas ({olderFollowUps.length})</summary>
-              <div className="mt-2 space-y-2">{olderFollowUps.map((q) => <QuestionCard key={q.id} q={q} />)}</div>
-            </details>
-          )}
-          {asked.length > 0 && (
-            <details className="text-sm">
-              <summary className="cursor-pointer muted">Asked ({asked.length})</summary>
-              <ul className="mt-2 space-y-1.5 border-l border-zinc-200 pl-3 dark:border-zinc-800">{asked.map((q) => <li key={q.id}>{q.text}</li>)}</ul>
-            </details>
-          )}
-        </section>
-
-        <section aria-label="Transcript" className={`${tab === "transcript" ? "" : "hidden lg:block"}`}>
+      {/* The coach is the screen; the transcript sits beside it. Nothing else competes for attention while the call is on. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
+        <div className="space-y-3 lg:sticky lg:top-20">
+          <Coach state={state} />
+          {help && <AssistCard item={help} />}
+        </div>
+        <section aria-label="Transcript">
           <h2 className="mb-2 text-sm font-semibold">Transcript</h2>
           <Transcript segments={state.transcript} partial={state.partial} />
         </section>
-
-        <section aria-label="Assessment" className={`space-y-3 ${tab === "assessment" ? "" : "hidden lg:block"}`}>
-          <h2 className="text-sm font-semibold">Assessment <span className="font-normal muted">· advisory, you decide</span></h2>
-          {state.answers.length === 0 ? <p className="text-sm muted">Answers appear here with a score as the candidate finishes each one.</p> : [...state.answers].reverse().map((a) => <AnswerCard key={a.id} answer={a} score={state.scores[a.id]} />)}
-        </section>
       </div>
+
+      {state.scorecard && <ScorecardView card={state.scorecard} />}
+
+      {finished.length > 0 && (
+        <details className="card p-4">
+          <summary className="cursor-pointer text-sm font-semibold">Scores for finished answers <span className="font-normal muted">({finished.length}) · advisory, you decide</span></summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">{finished.map((a) => <AnswerCard key={a.id} answer={a} score={state.scores[a.id]} />)}</div>
+        </details>
+      )}
+      {(upNext.length > 0 || asked.length > 0) && (
+        <details className="card p-4">
+          <summary className="cursor-pointer text-sm font-semibold">Your prepared questions <span className="font-normal muted">({upNext.length} left, {asked.length} asked)</span></summary>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">{upNext.map((q) => <QuestionCard key={q.id} q={q} />)}</div>
+        </details>
+      )}
     </div>
   );
 }
 
-function QuestionCard({ q, highlight }: { q: Question; highlight?: boolean }) {
+function QuestionCard({ q }: { q: Question }) {
   return (
-    <div className={`card p-3 text-sm ${highlight ? "border-indigo-300 bg-indigo-50/60 dark:border-indigo-900 dark:bg-indigo-950/30" : ""}`}>
-      {q.followKind && <span className="mb-1 inline-block rounded bg-indigo-100 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200">{FOLLOW[q.followKind]}</span>}
+    <div className="card p-3 text-sm">
       <p className="font-medium leading-snug">{q.text}</p>
       {q.why && <p className="mt-1 text-xs muted">{q.why}</p>}
       {(q.keyPoints.length > 0 || q.probes.length > 0) && (
@@ -129,7 +108,7 @@ function Transcript({ segments, partial }: { segments: { speakerId: string; spea
         const el = e.currentTarget;
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; // keep following unless the person scrolled up to read
       }}
-      className="card h-[28rem] space-y-3 overflow-y-auto p-4 lg:h-[calc(100vh-15rem)]"
+      className="card h-72 space-y-3 overflow-y-auto p-4 lg:h-[calc(100vh-13rem)]"
     >
       {segments.length === 0 && !partial && <p className="text-sm muted">Waiting for the conversation to start…</p>}
       {segments.map((s) => <Line key={`${s.speakerId}:${s.startMs}`} who={s.speakerName ?? s.role} role={s.role} text={s.text} at={clock(s.startMs)} />)}

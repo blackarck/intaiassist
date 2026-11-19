@@ -4,8 +4,12 @@ import type { TranscriptSegment } from "../meetingSource.js";
  * Turn detection: turns a stream of final transcript segments into "question -> answer" pairs.
  *
  *  - Interviewer speech (that is not just "ok", "right", "mm-hmm") is the question. Several segments in a row are one question.
+ *    While a candidate answer is open, a fragment of three words or fewer from the interviewer ("is wrong answer", "for that") is
+ *    NOT a new question: speech-to-text chops talk into pieces and the interviewer murmurs while listening.
  *  - The candidate's next speech opens an answer to that question; more candidate speech extends it.
- *  - The answer CLOSES when the interviewer speaks again, when the candidate has been quiet for `silenceMs`, or when the meeting ends.
+ *  - The answer CLOSES when the interviewer asks something substantive, when the candidate has been quiet for `silenceMs` (a LONG
+ *    pause: thinking aloud is not the end of an answer), or when the meeting ends. Short pauses are not handled here; the room
+ *    uses them to refresh its suggestions while the candidate is still talking.
  *  - If the candidate resumes within `reopenMs` and the interviewer has not spoken in between, the same answer is REOPENED
  *    (a pause to think is not the end of the answer). Closing it again produces a new version, which is re-scored.
  *  - Speech from people whose role is unknown is ignored here (it is still in the transcript).
@@ -59,6 +63,7 @@ export class TurnDetector {
 
     if (seg.role === "interviewer") {
       if (isBackchannel(text)) return [];
+      if (this.answer?.open && text.split(/\s+/).length <= 3) return []; // a fragment while the candidate is answering
       const effects = this.close("interviewer", now);
       this.interviewerSince = true;
       this.qBuf = this.lastWasInterviewer && this.qBuf ? { text: `${this.qBuf.text} ${text}`, startMs: this.qBuf.startMs } : { text, startMs: seg.startMs };
@@ -103,19 +108,11 @@ export class TurnDetector {
     return this.close("end", now);
   }
 
-  /**
-   * The interviewer has said nothing for `ms` after the candidate finished an answer: they may be busy writing, or stuck.
-   * Returns that answer's id once (so the caller can offer help without being asked), then stays quiet until the next answer.
-   */
-  stalled(now: number, ms: number): string | undefined {
+  /** The answer being given right now (or the latest finished one), for the caller to read. */
+  current(): { id: string; questionText: string; text: string; version: number; open: boolean; lastHeardAt: number } | undefined {
     const a = this.answer;
-    if (!a || a.open || a.closedAt === undefined || this.interviewerSince || this.nudged.has(`${a.id}:${a.version}`)) return undefined;
-    if (now - a.closedAt < ms) return undefined;
-    this.nudged.add(`${a.id}:${a.version}`);
-    return a.id;
+    return a && { id: a.id, questionText: a.questionText, text: a.text, version: a.version, open: a.open, lastHeardAt: a.lastHeardAt };
   }
-
-  private nudged = new Set<string>();
 
   get hasOpenAnswer(): boolean {
     return this.answer?.open === true;

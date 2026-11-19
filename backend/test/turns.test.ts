@@ -79,20 +79,26 @@ describe("TurnDetector", () => {
     expect(d.onSegment(seg("candidate", "A mutex is a lock", 3000), 3200)).toEqual([]); // webhook retry
   });
 
-  it("stalled(): reports a finished answer once when the interviewer has gone quiet, never while they are talking", () => {
-    d.onSegment(seg("interviewer", "Explain mutexes", 0), 0);
-    d.onSegment(seg("candidate", "A mutex is a lock", 3000), 3000);
-    expect(d.stalled(9000, 10_000)).toBeUndefined(); // answer still open
-    d.tick(6000); // closes at 6000
-    expect(d.stalled(12_000, 10_000)).toBeUndefined(); // only 6 s since the close
-    expect(d.stalled(16_500, 10_000)).toBe("a1");
-    expect(d.stalled(30_000, 10_000)).toBeUndefined(); // once
+  it("does not treat a short interviewer fragment during an answer as a new question", () => {
+    d.onSegment(seg("interviewer", "Why did the payment file fail", 0), 0);
+    d.onSegment(seg("candidate", "the bank account on the vendor was wrong", 3000), 3000);
+    expect(d.onSegment(seg("interviewer", "is wrong answer", 5000), 5000)).toEqual([]); // 3 words, answer open: a murmur
+    expect(d.onSegment(seg("interviewer", "for that", 5500), 5500)).toEqual([]);
+    expect(d.hasOpenAnswer).toBe(true);
+    // a real follow-up question (4+ words) still closes it and becomes the next question
+    const close = d.onSegment(seg("interviewer", "what specific places would you check first", 9000), 9000);
+    expect(close).toEqual([expect.objectContaining({ kind: "answer_close", reason: "interviewer", text: "the bank account on the vendor was wrong" })]);
+    const [open] = d.onSegment(seg("candidate", "I would open the vendor master and compare the account", 12_000), 12_000);
+    expect(open).toMatchObject({ kind: "answer_open", questionText: "what specific places would you check first" });
+  });
 
-    d.onSegment(seg("interviewer", "And deadlocks", 31_000), 31_000);
-    d.onSegment(seg("candidate", "Two locks taken in different orders", 34_000), 34_000);
-    d.tick(40_000);
-    d.onSegment(seg("interviewer", "Right and how do you avoid that", 41_000), 41_000);
-    expect(d.stalled(80_000, 10_000)).toBeUndefined(); // the interviewer already moved on: nothing to nudge
+  it("current() exposes the answer being given", () => {
+    expect(d.current()).toBeUndefined();
+    d.onSegment(seg("interviewer", "Explain mutexes", 0), 0);
+    d.onSegment(seg("candidate", "A mutex is a lock", 3000), 4000);
+    expect(d.current()).toMatchObject({ id: "a1", open: true, text: "A mutex is a lock", lastHeardAt: 4000, questionText: "Explain mutexes" });
+    d.tick(7000);
+    expect(d.current()).toMatchObject({ open: false, version: 1 });
   });
 
   it("flush closes the open answer at the end of the meeting", () => {

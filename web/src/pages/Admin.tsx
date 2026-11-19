@@ -10,7 +10,7 @@ interface Run { at: string; task: string; model?: string; ok: boolean; outcome: 
 
 const TASK_HELP: Record<string, string> = {
   opening_questions: "Extra questions from the JD and resume (once, at setup)",
-  next_questions: "Follow-ups after each answer (live, fast)",
+  live_coach: "The coach: how the answer stands and 2-3 questions to ask, refreshed while the candidate talks (live, fast)",
   assist: "“Assist me” suggestion (live, fast)",
   score_answer: "Score for each answer (background)",
   scorecard: "End-of-interview summary (background)",

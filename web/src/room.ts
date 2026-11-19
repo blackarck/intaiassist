@@ -1,4 +1,4 @@
-import type { AssistItem, Answer, Question, RoomEvent, Scorecard, Score, Segment, Snapshot } from "./types";
+import type { AssistItem, Answer, CoachData, Question, RoomEvent, Scorecard, Score, Segment, Snapshot } from "./types";
 
 /** Everything the room screen draws. Built from a snapshot, then kept current by applying live events. */
 export interface RoomState {
@@ -13,11 +13,13 @@ export interface RoomState {
   scores: Record<string, Score>;
   assists: AssistItem[];
   scorecard: Scorecard | null;
+  /** What the coach last said; stays on screen until the next one replaces it. */
+  coach: CoachData | null;
   /** Problems the person should know about (an AI call failed...). */
   notices: { at: string; text: string }[];
 }
 
-export const emptyRoom: RoomState = { loaded: false, lastSeq: 0, transcript: [], questions: [], answers: [], scores: {}, assists: [], scorecard: null, notices: [] };
+export const emptyRoom: RoomState = { loaded: false, lastSeq: 0, transcript: [], questions: [], answers: [], scores: {}, assists: [], scorecard: null, coach: null, notices: [] };
 
 export function fromSnapshot(s: Snapshot): RoomState {
   const scores: Record<string, Score> = {};
@@ -31,6 +33,7 @@ export function fromSnapshot(s: Snapshot): RoomState {
     answers: s.answers.map(({ score: _s, ...a }) => a),
     scores,
     scorecard: s.scorecard,
+    coach: s.coach,
   };
 }
 
@@ -38,7 +41,7 @@ const upsert = <T extends { id: string }>(list: T[], item: T): T[] => (list.some
 
 const NOTICE: Record<string, string> = {
   score_answer: "Scoring an answer failed. It will show without a score.",
-  next_questions: "Follow-up suggestions are unavailable for the last answer.",
+  live_coach: "Live suggestions are paused for a moment.",
   assist: "Assist is unavailable right now.",
   opening_questions: "Could not generate questions.",
   scorecard: "The scorecard could not be built.",
@@ -69,6 +72,8 @@ export function applyEvent(state: RoomState, e: RoomEvent): RoomState {
     }
     case "assist":
       return { ...next, assists: [{ ...(d as unknown as Omit<AssistItem, "at">), at: e.at }, ...next.assists].slice(0, 20) };
+    case "coach":
+      return { ...next, coach: { ...(d as unknown as Omit<CoachData, "at">), at: e.at } };
     case "scorecard":
       return { ...next, scorecard: d as unknown as Scorecard };
     case "status":
@@ -78,30 +83,4 @@ export function applyEvent(state: RoomState, e: RoomEvent): RoomState {
     default:
       return next;
   }
-}
-
-/**
- * What the coach panel shows RIGHT NOW. The interviewer is busy and will not press anything: this is derived from the latest answer
- * and updates by itself as the answer ends, the score arrives, and questions are suggested.
- */
-export type CoachView =
-  | { phase: "idle" }
-  | { phase: "listening"; question: string }
-  | { phase: "assessing"; question: string }
-  | { phase: "short"; question: string }
-  | { phase: "ready"; answer: Answer; score: Score; ask: Question[]; suggestion?: AssistItem };
-
-const MIN_WORDS = 8;
-
-export function coachView(s: RoomState): CoachView {
-  const a = s.answers.at(-1);
-  if (!a) return { phase: "idle" };
-  if (a.state === "open") return { phase: "listening", question: a.questionText };
-  const score = s.scores[a.id];
-  if (!score) return a.text.trim().split(/\s+/).length < MIN_WORDS ? { phase: "short", question: a.questionText } : { phase: "assessing", question: a.questionText };
-  const ask = s.questions.filter((q) => q.kind === "follow_up" && q.answerId === a.id && q.status === "queued");
-  // A suggestion offered after this answer (not one from an earlier answer).
-  const sug = s.assists[0];
-  const suggestion = sug && sug.at >= (s.scores[a.id]?.at ?? "") ? sug : undefined;
-  return { phase: "ready", answer: a, score, ask, suggestion };
 }

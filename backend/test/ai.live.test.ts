@@ -15,7 +15,7 @@ const FAST = ["azure:gpt-5.4-nano", "azure:gpt-5.4-mini", "azure:gpt-5.6-luna", 
 const SLOW = ["anthropic:sonnet", "azure:gpt-5.4", "azure:gpt-6-astra", "anthropic:haiku", "azure:gpt-5.6-terra"];
 const plan: Record<TaskName, string[]> = {
   opening_questions: FAST,
-  next_questions: FAST,
+  live_coach: FAST,
   assist: FAST,
   score_answer: SLOW,
   scorecard: SLOW,

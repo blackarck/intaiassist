@@ -194,10 +194,18 @@ describe("task rules", () => {
       expect(() => t.finalize!({ ...base, summary: bad }, t.sample), bad).toThrow(/decision/);
   });
 
-  it("next_questions and assist refuse repeats; assist demands real quotes", () => {
-    const nq = TASKS.next_questions;
-    const i = { ...nq.sample, asked: ["How did you monitor it afterwards?"] };
-    expect(() => nq.finalize!({ followUps: [{ text: "how did you monitor it afterwards", reason: "r", kind: "probe" }] }, i)).toThrow(/repeats/);
+  it("live_coach refuses questions the interviewer already asked (but may keep ones it showed a moment ago); assist demands real quotes", () => {
+    const lc = TASKS.live_coach;
+    const i = { ...lc.sample, asked: ["How did you monitor it afterwards?"], shown: ["Why did the pool run dry?"] };
+    const out = (text: string) => ({ stance: "vague" as const, remark: "r", questions: [{ text, remark: "x" }, { text: "Another one entirely about caches?", remark: "y" }], proof: null });
+    expect(() => lc.finalize!(out("how did you monitor it afterwards?"), i)).toThrow(/repeats/);
+    expect(() => lc.finalize!(out("Why did the pool run dry?"), i)).not.toThrow(); // keeping what is on screen keeps the screen steady
+    expect(() => lc.finalize!({ ...out("Fine question?"), proof: { text: "How did you monitor it afterwards?", remark: "p" } }, i)).toThrow(/repeats/);
+    // suggestions are questions to say aloud, not explanations
+    expect(() => lc.finalize!(out("You said a lot of things and that sounds like a symptom"), i)).toThrow(/short question/);
+    expect(() => lc.finalize!({ ...out("Fine question?"), proof: { text: "x".repeat(210) + "?", remark: "p" } }, i)).toThrow(/short question/);
+    const bad = lc.input.safeParse({ ...lc.sample, answerSoFar: "" });
+    expect(bad.success).toBe(false);
     const a = TASKS.assist;
     expect(() => a.finalize!({ suggestion: "s", kind: "reminder", evidence: ["We never had an outage during the migration"] }, a.sample)).not.toThrow();
     expect(() => a.finalize!({ suggestion: "s", kind: "reminder", evidence: ["invented quote"] }, a.sample)).toThrow(/copied exactly/);

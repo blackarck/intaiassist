@@ -18,17 +18,33 @@ export interface RoomDeps {
   reopenMs?: number;
   /** Cap on simultaneous AI calls across all interviews. */
   maxConcurrentAi?: number;
-  /**
-   * If the candidate has finished an answer and the interviewer has said nothing for this long, offer a suggestion without being
-   * asked (they are busy taking notes, not pressing buttons). 0 turns it off.
-   */
-  autoAssistMs?: number;
+  /** The coach refreshes its suggestions while the candidate talks: after this much new speech and at least `coachEveryMs` since the last time... */
+  coachNewWords?: number;
+  coachEveryMs?: number;
+  /** ...or after a short pause in the candidate's speech (with at least `coachPauseWords` new words). */
+  coachPauseMs?: number;
+  coachPauseWords?: number;
+  /** The candidate must have said at least this much before the coach says anything. */
+  coachMinWords?: number;
   /** Answers shorter than this many words are shown but not scored. */
   minScoreWords?: number;
   onWarn?: (message: string, err?: unknown) => void;
 }
 
+interface CoachState {
+  answerId?: string;
+  lastAt: number;
+  lastWords: number;
+  running: boolean;
+  /** More speech arrived while a refresh was running: run again with the latest text when it finishes. */
+  dirty: boolean;
+  /** Question texts on screen, passed back so the coach keeps what still fits and the screen stays steady. */
+  shown: string[];
+  errorFor?: string;
+}
+
 interface State {
+  coach: CoachState;
   detector: TurnDetector;
   chain: Promise<void>;
   answers: Map<string, RoomAnswer>;
@@ -110,6 +126,7 @@ export class RoomService {
       st.seen.add(key);
       await this.emit(seg.interviewId, "segment", data, true);
       await this.apply(seg.interviewId, st, st.detector.onSegment(seg, this.now()));
+      this.maybeCoach(seg.interviewId, st);
     });
   }
 
@@ -147,11 +164,10 @@ export class RoomService {
   }
 
   tickAll() {
-    const wait = this.d.autoAssistMs ?? 10_000;
     for (const [id, st] of this.states) {
       const effects = st.detector.tick(this.now());
       if (effects.length) this.enqueue(id, (s) => this.apply(id, s, effects));
-      if (wait > 0 && st.detector.stalled(this.now(), wait) !== undefined) this.spawn(id, () => this.assist(id, { auto: true }));
+      this.maybeCoach(id, st);
     }
   }
 
@@ -199,7 +215,7 @@ export class RoomService {
   }
 
   /** "Assist me": one suggestion grounded in this interview's own transcript, the resume and the JD. */
-  async assist(interviewId: string, opts: { auto?: boolean } = {}) {
+  async assist(interviewId: string) {
     const segs = await this.d.transcripts.listSegments(interviewId);
     const turns = segs.filter((s) => s.text.trim()).map((s) => ({ role: roleOf(s.role), text: s.text.slice(0, 1500) }));
     if (turns.length === 0) return fail("no_transcript", "nothing has been said yet");
@@ -214,8 +230,8 @@ export class RoomService {
       jd: setup?.jd.slice(0, 1500),
       asked,
     }, interviewId);
-    if (!res.ok) return opts.auto ? { ok: false as const, error: res.error } : this.aiError(interviewId, "assist", res);
-    await this.emit(interviewId, "assist", { ...(res.output as object), auto: opts.auto === true }, true);
+    if (!res.ok) return this.aiError(interviewId, "assist", res);
+    await this.emit(interviewId, "assist", res.output, true);
     return { ok: true as const, assist: res.output };
   }
 
@@ -252,7 +268,7 @@ export class RoomService {
 
   /** Everything the screen needs to draw the room from scratch (a page load or a reconnect after a long gap). */
   async snapshot(interviewId: string) {
-    const [setup, questions, answers, scores, scorecard, segs, lastSeq] = await Promise.all([
+    const [setup, questions, answers, scores, scorecard, segs, lastSeq, coach] = await Promise.all([
       this.d.rooms.getSetup(interviewId),
       this.d.rooms.listQuestions(interviewId),
       this.d.rooms.listAnswers(interviewId),
@@ -260,6 +276,7 @@ export class RoomService {
       this.d.rooms.lastEvent(interviewId, "scorecard"),
       this.d.transcripts.listSegments(interviewId),
       this.lastSeq(interviewId),
+      this.d.rooms.lastEvent(interviewId, "coach"),
     ]);
     const latest = new Map<string, RoomScore>();
     for (const s of scores) if (!latest.has(s.answerId) || latest.get(s.answerId)!.version < s.version) latest.set(s.answerId, s);
@@ -270,6 +287,8 @@ export class RoomService {
       questions,
       answers: answers.map((a) => ({ ...a, score: latest.get(a.id) ?? null })),
       scorecard: scorecard?.data ?? null,
+      /** What the coach last said. The screen shows it until the next one arrives. */
+      coach: coach ? { ...(coach.data as object), at: coach.at } : null,
       transcript: segs.map((s) => ({ speakerId: s.speakerId, speakerName: s.speakerName, role: roleOf(s.role), text: s.text, startMs: s.startMs, endMs: s.endMs })),
     };
   }
@@ -312,36 +331,71 @@ export class RoomService {
         await this.emit(interviewId, "answer", a, true);
         if (words(a.text) >= (this.d.minScoreWords ?? 8)) {
           const snap = { ...a };
-          this.spawn(interviewId, () => this.followUps(snap));
           this.spawn(interviewId, () => this.scoreJob(snap));
         }
       }
     }
   }
 
-  private async followUps(a: RoomAnswer) {
-    const segs = await this.d.transcripts.listSegments(a.interviewId);
-    const recentTurns = segs.filter((s) => s.text.trim()).slice(-8).map((s) => ({ role: roleOf(s.role), text: s.text.slice(0, 1500) }));
-    const [qs, setup] = await Promise.all([this.d.rooms.listQuestions(a.interviewId), this.d.rooms.getSetup(a.interviewId)]);
-    const current = qs.find((q) => q.id === a.questionId);
-    const res = await this.run("next_questions", {
-      recentTurns: recentTurns.length ? recentTurns : [{ role: "candidate", text: a.text.slice(0, 1500) }],
-      currentQuestion: { text: a.questionText.slice(0, 600), keyPoints: current?.keyPoints },
-      asked: qs.filter((q) => q.status === "asked").map((q) => q.text.slice(0, 600)).slice(-40),
-      jd: setup?.jd.slice(0, 1500),
-    }, a.interviewId);
-    if (!res.ok) return void (await this.aiError(a.interviewId, "next_questions", res));
-    const existing = (await this.d.rooms.listQuestions(a.interviewId)).filter((q) => q.kind === "follow_up" && q.answerId === a.id && q.status === "queued");
-    // The score found specific problems and already supplied pointed questions for them: those are better, keep them.
-    if (existing.some((q) => q.source === "score")) return;
-    // A newer close of the same answer replaces the older fast suggestions.
-    const stale = existing.map((q) => q.id);
-    await this.d.rooms.deleteQuestions(a.interviewId, stale);
-    const items = (res.output as { followUps: { text: string; reason: string; kind: RoomQuestion["followKind"] }[] }).followUps.map((f): RoomQuestion => ({
-      id: this.id(), interviewId: a.interviewId, kind: "follow_up", text: f.text, why: f.reason, keyPoints: [], probes: [], answerId: a.id, followKind: f.kind, source: "fast", status: "queued", createdAt: new Date(this.now()).toISOString(),
-    }));
-    for (const q of items) await this.d.rooms.saveQuestion(q);
-    await this.emit(a.interviewId, "questions", { reason: "follow_up", answerId: a.id, items, removedIds: stale }, true);
+  /**
+   * Keeps the interviewer's screen current WHILE the candidate is talking: when enough new speech has arrived (or the candidate pauses),
+   * ask the live coach again. One refresh at a time per interview; speech that arrives meanwhile is picked up by the next one.
+   */
+  private maybeCoach(interviewId: string, st: State) {
+    const cur = st.detector.current();
+    if (!cur?.open) return;
+    const n = words(cur.text);
+    if (n < (this.d.coachMinWords ?? 15)) return;
+    const c = st.coach;
+    const sameAnswer = c.answerId === cur.id;
+    const newWords = n - (sameAnswer ? c.lastWords : 0);
+    const since = this.now() - (sameAnswer ? c.lastAt : 0);
+    const quiet = this.now() - cur.lastHeardAt;
+    const due = !sameAnswer || (newWords >= (this.d.coachNewWords ?? 25) && since >= (this.d.coachEveryMs ?? 8000)) || (quiet >= (this.d.coachPauseMs ?? 2500) && newWords >= (this.d.coachPauseWords ?? 8) && since >= 4000);
+    if (!due) return;
+    if (c.running) {
+      c.dirty = true;
+      return;
+    }
+    c.running = true;
+    c.dirty = false;
+    c.answerId = cur.id;
+    c.lastWords = n;
+    c.lastAt = this.now();
+    this.spawn(interviewId, async () => {
+      try {
+        await this.coachJob(interviewId, st, cur);
+      } finally {
+        c.running = false;
+        if (c.dirty) this.maybeCoach(interviewId, st);
+      }
+    });
+  }
+
+  private async coachJob(interviewId: string, st: State, cur: { id: string; questionText: string; text: string }) {
+    const [segs, qs, setup] = await Promise.all([this.d.transcripts.listSegments(interviewId), this.d.rooms.listQuestions(interviewId), this.d.rooms.getSetup(interviewId)]);
+    const ans = st.answers.get(cur.id);
+    const matched = qs.find((q) => q.id === ans?.questionId);
+    const res = await this.run("live_coach", {
+      question: { text: cur.questionText.slice(0, 600), keyPoints: matched?.keyPoints },
+      answerSoFar: cur.text.slice(-3000),
+      recentTurns: segs.filter((s) => s.text.trim()).slice(-6).map((s) => ({ role: roleOf(s.role), text: s.text.slice(0, 1500) })),
+      resumeSummary: setup?.resumeSummary?.slice(0, 1500),
+      jd: setup?.jd.slice(0, 1000),
+      asked: qs.filter((q) => q.status === "asked").map((q) => q.text.slice(0, 600)).slice(-30),
+      shown: st.coach.shown,
+    }, interviewId);
+    if (!res.ok) {
+      // Stay quiet on a hiccup (the previous suggestions stay on screen); say so once per answer if it keeps failing.
+      if (st.coach.errorFor !== cur.id) {
+        st.coach.errorFor = cur.id;
+        await this.aiError(interviewId, "live_coach", res);
+      }
+      return;
+    }
+    const out = res.output as { questions: { text: string }[]; proof: { text: string } | null };
+    st.coach.shown = [...out.questions.map((q) => q.text), ...(out.proof ? [out.proof.text] : [])].slice(0, 4);
+    await this.emit(interviewId, "coach", { answerId: cur.id, ...(res.output as object) }, true);
   }
 
   private async scoreJob(a: RoomAnswer) {
@@ -358,36 +412,6 @@ export class RoomService {
     const score: RoomScore = { interviewId: a.interviewId, answerId: a.id, version: a.version, model: res.model, output: res.output as RoomScore["output"], at: new Date(this.now()).toISOString() };
     await this.d.rooms.saveScore(score);
     await this.emit(a.interviewId, "score", score, true);
-    await this.counterQuestions(a, score);
-  }
-
-  /**
-   * Turn the problems the scoring found into questions the interviewer can ask now, one per problem, each tied to the candidate's own
-   * words. They replace the generic follow-ups for the same answer. Skipped if the candidate has since carried on (a newer version of
-   * the answer is being scored and will produce its own).
-   */
-  private async counterQuestions(a: RoomAnswer, score: RoomScore) {
-    const o = score.output;
-    const picks = o.problems.filter((p) => p.counterQuestion.trim()).slice(0, 2);
-    // Not first-hand? Add the question that makes them prove they did the work. It goes last: fix what is wrong first.
-    const proof = o.experience.signal !== "first_hand" && o.experience.probe.trim() ? o.experience : undefined;
-    if (picks.length === 0 && !proof) return;
-    const current = (await this.d.rooms.listAnswers(a.interviewId)).find((x) => x.id === a.id);
-    if (current && current.version > a.version) return;
-    const stale = (await this.d.rooms.listQuestions(a.interviewId)).filter((q) => q.kind === "follow_up" && q.answerId === a.id && q.status === "queued").map((q) => q.id);
-    await this.d.rooms.deleteQuestions(a.interviewId, stale);
-    const items = picks.map((p): RoomQuestion => ({
-      id: this.id(), interviewId: a.interviewId, kind: "follow_up", text: p.counterQuestion, why: p.issue, keyPoints: p.correction ? [p.correction] : [], probes: [],
-      answerId: a.id, followKind: p.severity === "major" ? "probe" : "clarify", source: "score", aboutQuote: p.quote, status: "queued", createdAt: new Date(this.now()).toISOString(),
-    }));
-    if (proof) {
-      items.push({
-        id: this.id(), interviewId: a.interviewId, kind: "follow_up", text: proof.probe, why: `Check they did the work: ${proof.evidence}`, keyPoints: [], probes: [],
-        answerId: a.id, followKind: "probe", source: "score", status: "queued", createdAt: new Date(this.now()).toISOString(),
-      });
-    }
-    for (const q of items) await this.d.rooms.saveQuestion(q);
-    await this.emit(a.interviewId, "questions", { reason: "follow_up", answerId: a.id, items, removedIds: stale }, true);
   }
 
   // ---- plumbing
@@ -412,7 +436,8 @@ export class RoomService {
     let st = this.states.get(interviewId);
     if (!st) {
       st = {
-        detector: new TurnDetector({ silenceMs: this.d.silenceMs ?? 2500, reopenMs: this.d.reopenMs ?? 20_000, newId: () => this.id() }),
+        coach: { lastAt: 0, lastWords: 0, running: false, dirty: false, shown: [] },
+        detector: new TurnDetector({ silenceMs: this.d.silenceMs ?? 20_000, reopenMs: this.d.reopenMs ?? 20_000, newId: () => this.id() }),
         chain: Promise.resolve(),
         answers: new Map(),
         seen: new Set(),

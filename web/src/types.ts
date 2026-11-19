@@ -58,7 +58,19 @@ export interface Answer {
 
 export interface Segment { speakerId: string; speakerName?: string; role: "interviewer" | "candidate" | "unknown"; text: string; startMs: number; endMs?: number }
 
-export interface AssistItem { suggestion: string; kind: "question" | "reminder" | "clarify"; evidence: string[]; at: string; /** Offered without being asked. */ auto?: boolean }
+export interface AssistItem { suggestion: string; kind: "question" | "reminder" | "clarify"; evidence: string[]; at: string }
+
+export interface Suggestion { text: string; remark: string }
+/** What the live coach says about the answer being given, refreshed while the candidate talks. */
+export interface CoachData {
+  answerId: string;
+  stance: "right" | "partly_right" | "wrong" | "vague";
+  remark: string;
+  questions: Suggestion[];
+  /** A question that makes them prove they did the work, when the answer sounds secondhand. */
+  proof: Suggestion | null;
+  at: string;
+}
 
 export interface Scorecard {
   summary: string;
@@ -77,6 +89,7 @@ export interface Snapshot {
   questions: Question[];
   answers: (Answer & { score: Score | null })[];
   scorecard: Scorecard | null;
+  coach: CoachData | null;
   transcript: Segment[];
 }
 

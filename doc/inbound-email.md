@@ -20,15 +20,19 @@ Your domain `askproso.ai` is **already authenticated in SendGrid** (confirmed in
 point to SendGrid account `u29064459`, and a DMARC record exists). SendGrid requires the Inbound Parse domain to be one of your
 authenticated domains, so that prerequisite is met.
 
-### 1. SendGrid: create an API key (about 3 minutes)
+### 1. SendGrid: create an API key (optional for now; needed to send e-mail later)
+
+**You do not need an API key to receive invite e-mail.** The Inbound Parse host (step 3, option A) is created by hand in the dashboard.
+The key's Inbound Parse permission only lets my optional script do that step for you, and it is not needed at runtime. If you cannot find
+that permission, skip it: a key with only **Mail Send** is all the backend will ever use.
 
 1. Sign in at <https://app.sendgrid.com>. In the left menu open **Settings > API Keys**.
 2. Click **Create API Key**.
 3. **API Key Name:** `intassist-backend`.
 4. **API Key Permissions:** choose **Custom Access** (older screens call it "Restricted Access"). Do **not** choose Full Access.
 5. In the permission list tick:
-   - **Inbound Parse**: the category that holds the Inbound Parse settings permissions (internally `user.webhooks.parse.settings.create/read/update/delete`).
-     If you cannot find it, use the search box on that page for "parse".
+   - **Inbound Parse** (optional, only for the script): SendGrid's reference files these under the **Webhook** heading
+     (`user.webhooks.parse.settings.create/read/update/delete`), so look under "Webhook" if there is nothing called Inbound Parse. If it is not there, skip it.
    - **Mail Send**: tick **Mail Send** (leave "Scheduled Sends" off). This is for the e-mails we send later.
 6. Click **Create & View**. The key is shown **once**. Keep that browser tab open until the next step is done.
 7. In a terminal, run `infra/sendgrid/store-api-key.sh`. It asks you to paste the key at a hidden prompt (nothing appears on
@@ -110,3 +114,20 @@ for sending, messages could loop between its CNAME and MX records. Ours is a dif
 - One SendGrid page describes raw mode as a multipart form with an `email` field, another as JSON. The endpoint accepts both.
 - SendGrid's retry behaviour for non-2xx answers is not described in the pages I read.
 - The configuration script has not been run against a live account.
+
+## If you cannot find Inbound Parse in the dashboard
+
+SendGrid's current docs still place it at **Settings > Inbound Parse** (direct link: <https://app.sendgrid.com/settings/parse>), and nothing I found says it moved.
+Try, in this order:
+1. **Open the direct link while signed in.** Page with an *Add Host & URL* button: you are fine, the menu entry is just hidden or renamed. Error, redirect, or an upgrade message: continue below.
+2. **Your role.** Settings pages are limited for non-admin teammates. Check **Settings > Teammates** that you are the account **Admin**.
+3. **Your plan.** SendGrid ended its permanent free plan (it now offers a 60-day trial, then paid tiers), and the sources I found disagree on whether Inbound Parse is on every tier;
+   I could not read SendGrid's own feature table. Check **Settings > Account Details** for your plan, and SendGrid's pricing page for the *Inbound Parse Webhook* row.
+4. **Contact SendGrid support** with the direct link and what you see.
+
+Things that make a configured host silently not deliver (from SendGrid's troubleshooting article): extra MX records on the host (`mx.sendgrid.net` must be the **only** MX for it);
+mail sent to the parent domain instead of the host; local parts like `unsubscribe`, `postmaster`, `abuse`, `admin` (our `iv-...` addresses are fine).
+
+**If Inbound Parse turns out not to be available on your plan,** the alternatives are (a) another inbound-mail service that posts to a URL (Mailgun Routes, Postmark Inbound),
+(b) AWS SES inbound, or (c) our own small SMTP receiver on the VM: no third party and no plan question, and it can refuse any recipient that is not a known alias at the SMTP stage,
+but it means running a public mail port and verifying SPF/DKIM ourselves. The backend's parsing and security checks would be reused as they are.

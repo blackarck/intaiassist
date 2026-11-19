@@ -5,10 +5,10 @@ import os
 import sys
 
 NEEDED = [
-    ("user.webhooks.parse.settings.create", "create the Inbound Parse host   (needed now)"),
-    ("user.webhooks.parse.settings.read", "read Inbound Parse hosts        (needed now)"),
-    ("user.webhooks.parse.settings.update", "edit the Inbound Parse host     (useful)"),
-    ("mail.send", "send e-mail                     (needed later)"),
+    ("mail.send", "send e-mail                     (needed later, for notifications)"),
+    ("user.webhooks.parse.settings.create", "create the Inbound Parse host   (optional: only for the script; the dashboard needs no key)"),
+    ("user.webhooks.parse.settings.read", "read Inbound Parse hosts        (optional, same)"),
+    ("user.webhooks.parse.settings.update", "edit the Inbound Parse host     (optional, same)"),
 ]
 
 
@@ -20,15 +20,9 @@ def main() -> int:
         return 0
 
     print("This key can:")
-    missing_now = False
     for scope, why in NEEDED:
         ok = scope in have
         print(f"  {'YES' if ok else 'NO '}  {scope:38s} {why}")
-        if not ok and "needed now" in why:
-            missing_now = True
-    if missing_now:
-        print("\nA permission needed now shows NO. If you ticked Inbound Parse when creating the key, SendGrid's response format may")
-        print("have changed and the key could still be fine; otherwise create the key again with the Inbound Parse permissions ticked.")
     return 0
 
 

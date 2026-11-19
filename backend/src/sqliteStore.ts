@@ -255,6 +255,11 @@ export class SqliteStore implements InterviewStore, TranscriptStore, InboundMess
       );
   }
 
+  async deleteById(id: string) {
+    // transcript and room tables cascade (foreign_keys is ON)
+    this.db.prepare("DELETE FROM interviews WHERE id = ?").run(id);
+  }
+
   // ---- transcript
 
   async appendSegment(seg: TranscriptSegment) {

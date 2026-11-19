@@ -4,6 +4,7 @@ import { setAuthHeader } from "./api";
 import { config } from "./config";
 
 const SCOPES = ["openid", "profile", "email"];
+const CALENDAR_SCOPES = ["Calendars.Read"];
 const msal = config.msClientId
   ? new PublicClientApplication({ auth: { clientId: config.msClientId, authority: config.msAuthority, redirectUri: `${window.location.origin}/redirect.html` }, cache: { cacheLocation: "localStorage" } })
   : undefined;
@@ -15,6 +16,8 @@ interface AuthState {
   /** False when no sign-in provider is configured in this build. */
   canSignIn: boolean;
   error?: string;
+  /** A Microsoft Graph token for reading the calendar. Asks the person for that permission the first time (needs a click). */
+  calendarToken?: () => Promise<string>;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -68,6 +71,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const calendarToken = useMemo(() => {
+    if (config.devUser || !msal) return undefined;
+    return async () => {
+      const acct = account ?? msal.getAllAccounts()[0];
+      if (!acct) throw new Error("not signed in");
+      const req = { scopes: CALENDAR_SCOPES, account: acct };
+      try {
+        return (await msal.acquireTokenSilent(req)).accessToken;
+      } catch (e) {
+        if (e instanceof InteractionRequiredAuthError) return (await msal.acquireTokenPopup(req)).accessToken;
+        throw e;
+      }
+    };
+  }, [account]);
+
   const signOut = useCallback(async () => {
     if (config.devUser) return;
     await msal?.logoutPopup({ account }).catch(() => undefined);
@@ -76,8 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [account]);
 
   const value = useMemo<AuthState>(
-    () => ({ status, name: config.devUser ? config.devUser.split("@")[0] : account?.name, email: config.devUser || account?.username, canSignIn: !!msal, error, signIn, signOut }),
-    [status, account, error, signIn, signOut],
+    () => ({ status, name: config.devUser ? config.devUser.split("@")[0] : account?.name, email: config.devUser || account?.username, canSignIn: !!msal, error, calendarToken, signIn, signOut }),
+    [status, account, error, calendarToken, signIn, signOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

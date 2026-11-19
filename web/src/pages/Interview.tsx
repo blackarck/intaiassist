@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Room } from "../components/Room";
 import { SetupForm } from "../components/SetupForm";
 import { CopyButton, ErrorNote, Spinner, StatusBadge, when } from "../components/ui";
+import { api } from "../api";
 import { useInterview } from "../hooks";
 
 export function InterviewPage() {
@@ -10,6 +11,19 @@ export function InterviewPage() {
   const { data: iv, error, loading, reload } = useInterview(id);
   const [tab, setTab] = useState<"prepare" | "room">("prepare");
   const [liveStatus, setLiveStatus] = useState<string>();
+  const nav = useNavigate();
+  const [deleting, setDeleting] = useState(false);
+  const remove = async () => {
+    if (!window.confirm("Delete this interview and its transcript? This cannot be undone.")) return;
+    setDeleting(true);
+    try {
+      await api(`/api/interviews/${id}`, { method: "DELETE" });
+      nav("/");
+    } catch {
+      setDeleting(false);
+      window.alert("Could not delete the interview.");
+    }
+  };
 
   // Once the call is on, the room is what you want to see.
   useEffect(() => {
@@ -29,6 +43,9 @@ export function InterviewPage() {
   if (loading && !iv) return <Spinner />;
   if (error || !iv) return <div className="space-y-3"><ErrorNote>{error ?? "Interview not found."}</ErrorNote><Link to="/" className="text-sm text-indigo-600 hover:underline">Back to interviews</Link></div>;
 
+  // Once it is over nothing can be changed: show what was recorded, and nothing to edit.
+  const finished = (liveStatus ?? iv.status) === "ended";
+
   return (
     <div className="space-y-5">
       <div>
@@ -36,7 +53,8 @@ export function InterviewPage() {
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">Interview</h1>
           <StatusBadge status={liveStatus ?? iv.status} />
-          {iv.startsAt && <span className="text-sm muted">Starts {when(iv.startsAt)}</span>}
+          {iv.startsAt && <span className="text-sm muted">{finished ? "Started" : "Starts"} {when(iv.startsAt)}</span>}
+          <button type="button" className="btn-ghost ml-auto !text-red-600" onClick={remove} disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</button>
         </div>
       </div>
 
@@ -54,13 +72,13 @@ export function InterviewPage() {
       </section>
       )}
 
-      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
+      {!finished && <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
         {(["prepare", "room"] as const).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium capitalize ${tab === t ? "border-indigo-600 text-indigo-700 dark:text-indigo-300" : "border-transparent muted hover:text-zinc-900 dark:hover:text-zinc-100"}`}>{t === "room" ? "Live room" : "Prepare"}</button>
         ))}
-      </div>
+      </div>}
 
-      {tab === "prepare" ? <SetupForm id={id} onSaved={() => undefined} /> : <Room id={id} status={iv.status} onStatus={setLiveStatus} />}
+      {finished ? <Room id={id} status="ended" onStatus={setLiveStatus} readOnly /> : tab === "prepare" ? <SetupForm id={id} onSaved={() => undefined} /> : <Room id={id} status={iv.status} onStatus={setLiveStatus} />}
     </div>
   );
 }

@@ -46,5 +46,29 @@ describe("read API: interview state and transcript", () => {
     const bare = buildApp({ store, controller: fakeController(), aliasDomain: "x", intakeToken: "api-token", enableDevRoutes: false });
     expect((await bare.inject({ method: "GET", url: "/api/interviews/i-1/transcript", headers: { authorization: "Bearer api-token" } })).statusCode).toBe(501);
   });
+
+  it("deletes an interview in any state, with its transcript, and stops its bot", async () => {
+    const res = await app.inject({ method: "DELETE", url: "/api/interviews/i-1", headers: { authorization: "Bearer api-token" } });
+    expect(res.statusCode).toBe(204);
+    expect(await store.findById("i-1")).toBeUndefined();
+    expect(await store.listSegments("i-1")).toEqual([]);
+    expect((await get("/api/interviews/i-1")).statusCode).toBe(404);
+    expect((await app.inject({ method: "DELETE", url: "/api/interviews/i-1", headers: { authorization: "Bearer api-token" } })).statusCode).toBe(404);
+  });
+
+  it("sends the bot into a calendar meeting once, even if asked twice", async () => {
+    const ctl = fakeController();
+    const verifier = { verify: async (t: string) => (t === "tok" ? { provider: "microsoft" as const, subject: "microsoft:t:u1", email: "me@x.com" } : undefined) };
+    const a = buildApp({ store, transcripts: store, controller: ctl, aliasDomain: "invite.askproso.ai", intakeToken: "api-token", enableDevRoutes: false, verifier });
+    const join = (link: string) => a.inject({ method: "POST", url: "/api/me/interviews/join", headers: { authorization: "Bearer tok" }, payload: { link, startsAt: "2026-11-19T09:00:00Z" } });
+    const url = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%7d";
+    const first = await join(url);
+    expect(first.statusCode).toBe(200);
+    expect(first.json().status).toBe("scheduled");
+    const again = await join(url);
+    expect(again.json().id).toBe(first.json().id);
+    expect((await store.listByOwner("microsoft:t:u1")).length).toBe(1);
+    expect((await join("no link here")).statusCode).toBe(422);
+  });
 });
 void auth;

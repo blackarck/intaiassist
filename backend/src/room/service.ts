@@ -141,6 +141,14 @@ export class RoomService {
     else if (e.type === "admitted") this.onStatus(e.interviewId, "in_meeting");
   }
 
+  /** The interview is being deleted: drop what is held in memory and wait out work in flight, so nothing is written back after. */
+  async forget(interviewId: string) {
+    this.states.delete(interviewId);
+    await this.idle(interviewId);
+    this.states.delete(interviewId);
+    await this.d.rooms.deleteRoom(interviewId);
+  }
+
   /** The bot's status changed (joining, in the meeting, ended...). */
   onStatus(interviewId: string, status: string) {
     this.enqueue(interviewId, async () => {

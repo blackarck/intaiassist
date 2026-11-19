@@ -13,6 +13,7 @@ import { handleBotEvent, type SegmentHandler } from "./events.js";
 import type { MeetingEvent } from "./meetingSource.js";
 import { parseSendGridInbound } from "./inbound.js";
 import { handleInvite, handlePastedLink, type IntakeDeps } from "./intake.js";
+import { extractMeetingLink } from "./invite.js";
 import type { InviteEmail } from "./invite.js";
 import { handleRecallWebhook, verifyRecallSignature } from "./recallWebhook.js";
 import { openLive, sseFrame } from "./room/live.js";
@@ -199,10 +200,56 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
     return reply.code(500).send({ error: "could not allocate an alias" });
   });
 
+  // Send the assistant into a meeting the person already has (picked from their calendar): creates the interview and the bot in
+  // one step. A meeting that has started is joined at once, so this also works for a call that is already running.
+  // Asking twice for the same meeting returns the interview that exists, so it can never send two bots.
+  app.post<{ Body: { link?: string; startsAt?: string } }>("/api/me/interviews/join", async (req, reply) => {
+    const p = (req.auth as { kind: "user"; principal: Principal }).principal;
+    const link = req.body?.link;
+    if (typeof link !== "string" || link.length > 5000) return reply.code(400).send({ error: "link is required" });
+    const meeting = extractMeetingLink(link);
+    if (!meeting) return reply.code(422).send({ error: "This meeting has no Teams, Zoom or Meet link the assistant can join." });
+    const startsAt = typeof req.body?.startsAt === "string" && !Number.isNaN(Date.parse(req.body.startsAt)) ? new Date(req.body.startsAt).toISOString() : undefined;
+
+    const mine = await cfg.store.listByOwner(p.subject);
+    const existing = mine.find((i) => i.joinUrl === meeting.url && ["scheduled", "joining", "in_meeting"].includes(i.status));
+    if (existing) return publicInterview(existing);
+    if (mine.length >= 200) return reply.code(429).send({ error: "interview limit reached" });
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const interview = { id: crypto.randomUUID(), alias: generateAlias(), ownerEmail: p.email, ownerSubject: p.subject, status: "paid" as const };
+      try {
+        await cfg.store.save(interview);
+      } catch {
+        continue;
+      }
+      try {
+        const res = await handlePastedLink({ alias: interview.alias, link: meeting.url, startsAt }, cfg);
+        if (res.status !== "scheduled") throw new Error(res.status);
+      } catch {
+        await cfg.store.deleteById(interview.id); // leave nothing half-made behind
+        return reply.code(502).send({ error: "Could not send the assistant to that meeting. Try again in a moment." });
+      }
+      return publicInterview((await cfg.store.findById(interview.id))!);
+    }
+    return reply.code(500).send({ error: "could not allocate an alias" });
+  });
+
   app.get<{ Params: { id: string } }>("/api/interviews/:id", async (req, reply) => {
     const i = await cfg.store.findById(req.params.id);
     if (!i) return reply.code(404).send({ error: "not found" });
     return publicInterview(i);
+  });
+
+  // Delete an interview: stops its bot if one is waiting or in the call, then removes it with its transcript and coaching data.
+  // Works in any state, so an interview stuck waiting or in a lobby can always be cleared.
+  app.delete<{ Params: { id: string } }>("/api/interviews/:id", async (req, reply) => {
+    const i = await cfg.store.findById(req.params.id);
+    if (!i) return reply.code(404).send({ error: "not found" });
+    await cfg.controller.cancel(i);
+    await cfg.room?.forget(i.id);
+    await cfg.store.deleteById(i.id);
+    return reply.code(204).send();
   });
 
   app.get<{ Params: { id: string }; Querystring: { format?: string } }>("/api/interviews/:id/transcript", async (req, reply) => {

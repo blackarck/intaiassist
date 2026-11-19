@@ -51,6 +51,8 @@ export interface InterviewStore {
   listByOwner(subject: string): Promise<Interview[]>;
   /** Insert or update by id. Throws if the alias already belongs to a different interview. */
   save(interview: Interview): Promise<void>;
+  /** Remove the interview. Its transcript and room data go with it. */
+  deleteById(id: string): Promise<void>;
 }
 
 export interface TranscriptStore {
@@ -102,6 +104,11 @@ export class InMemoryStore implements InterviewStore, TranscriptStore, InboundMe
     }
     const createdAt = this.byId.get(interview.id)?.createdAt ?? new Date().toISOString();
     this.byId.set(interview.id, { ...interview, createdAt });
+  }
+
+  async deleteById(id: string) {
+    this.byId.delete(id);
+    this.segments.delete(id);
   }
 
   async appendSegment(s: TranscriptSegment) {

@@ -27,7 +27,7 @@ type Action = { kind: "snapshot"; snap: Snapshot } | { kind: "event"; e: RoomEve
 const reduce = (s: RoomState, a: Action): RoomState => (a.kind === "snapshot" ? fromSnapshot(a.snap) : applyEvent(s, a.e));
 
 /** The live room: snapshot first, then the event stream from where the snapshot ended. */
-export function useRoom(id: string) {
+export function useRoom(id: string, follow = true) {
   const [state, dispatch] = useReducer(reduce, emptyRoom);
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const [error, setError] = useState<string>();
@@ -41,13 +41,14 @@ export function useRoom(id: string) {
         const snap = await api<Snapshot>(`/api/interviews/${id}/room`);
         dispatch({ kind: "snapshot", snap });
         started.current = true;
+        if (!follow) return; // a finished interview does not change: read it once
         await followRoom(id, snap.lastSeq, (e) => dispatch({ kind: "event", e }), setConnection, ctl.signal);
       } catch (e) {
         if (!ctl.signal.aborted) setError(e instanceof ApiError ? e.message : "Could not open the room");
       }
     })();
     return () => ctl.abort();
-  }, [id]);
+  }, [id, follow]);
 
   return { state, connection, error };
 }

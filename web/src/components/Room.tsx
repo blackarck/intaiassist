@@ -6,8 +6,8 @@ import { Coach } from "./Coach";
 import { AnswerCard, ScoreBadge } from "./Score";
 import { CopyButton, ErrorNote, Spinner, StatusBadge, clock, unquote } from "./ui";
 
-export function Room({ id, status, onStatus }: { id: string; status: string; onStatus?: (s: string) => void }) {
-  const { state, connection, error } = useRoom(id);
+export function Room({ id, status, onStatus, readOnly = false }: { id: string; status: string; onStatus?: (s: string) => void; readOnly?: boolean }) {
+  const { state, connection, error } = useRoom(id, !readOnly);
   const [assisting, setAssisting] = useState(false);
   const [assistError, setAssistError] = useState<string>();
 
@@ -38,11 +38,17 @@ export function Room({ id, status, onStatus }: { id: string; status: string; onS
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <StatusBadge status={live} />
-        <span className="flex items-center gap-1.5 muted" role="status">
-          <span className={`size-2 rounded-full ${connection === "live" ? "bg-emerald-500" : "animate-pulse bg-amber-500"}`} />
-          {connection === "live" ? "Connected" : "Reconnecting…"}
-        </span>
-        <button type="button" className="btn-ghost ml-auto" onClick={askAssist} disabled={assisting || state.transcript.length === 0}>{assisting ? "Thinking…" : "Need another idea?"}</button>
+        {readOnly ? (
+          <span className="muted">Read only · this interview is over</span>
+        ) : (
+          <>
+            <span className="flex items-center gap-1.5 muted" role="status">
+              <span className={`size-2 rounded-full ${connection === "live" ? "bg-emerald-500" : "animate-pulse bg-amber-500"}`} />
+              {connection === "live" ? "Connected" : "Reconnecting…"}
+            </span>
+            <button type="button" className="btn-ghost ml-auto" onClick={askAssist} disabled={assisting || state.transcript.length === 0}>{assisting ? "Thinking…" : "Need another idea?"}</button>
+          </>
+        )}
       </div>
       {assistError && <ErrorNote>{assistError}</ErrorNote>}
       {state.notices[0] && <p className="text-xs muted" role="status">{state.notices[0].text}</p>}
@@ -50,19 +56,21 @@ export function Room({ id, status, onStatus }: { id: string; status: string; onS
       {/* The coach is the screen; the transcript sits beside it. Nothing else competes for attention while the call is on. */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
         <div className="space-y-3 lg:sticky lg:top-20">
-          <Coach state={state} />
-          {help && <AssistCard item={help} />}
+          {(!readOnly || state.coach) && <Coach state={state} />}
+          {readOnly && state.scorecard && <ScorecardView card={state.scorecard} />}
+          {readOnly && !state.coach && !state.scorecard && <p className="card p-4 text-sm muted">No coaching or scorecard was recorded for this interview.</p>}
+          {!readOnly && help && <AssistCard item={help} />}
         </div>
         <section aria-label="Transcript">
           <h2 className="mb-2 text-sm font-semibold">Transcript</h2>
-          <Transcript segments={state.transcript} partial={state.partial} />
+          <Transcript segments={state.transcript} partial={state.partial} done={readOnly} />
         </section>
       </div>
 
-      {state.scorecard && <ScorecardView card={state.scorecard} />}
+      {!readOnly && state.scorecard && <ScorecardView card={state.scorecard} />}
 
       {finished.length > 0 && (
-        <details className="card p-4">
+        <details className="card p-4" open={readOnly}>
           <summary className="cursor-pointer text-sm font-semibold">Scores for finished answers <span className="font-normal muted">({finished.length}) · advisory, you decide</span></summary>
           <div className="mt-3 grid gap-3 md:grid-cols-2">{finished.map((a) => <AnswerCard key={a.id} answer={a} score={state.scores[a.id]} />)}</div>
         </details>
@@ -94,7 +102,7 @@ function QuestionCard({ q }: { q: Question }) {
   );
 }
 
-function Transcript({ segments, partial }: { segments: { speakerId: string; speakerName?: string; role: string; text: string; startMs: number }[]; partial?: { speakerName?: string; role: string; text: string } }) {
+function Transcript({ segments, partial, done }: { done?: boolean; segments: { speakerId: string; speakerName?: string; role: string; text: string; startMs: number }[]; partial?: { speakerName?: string; role: string; text: string } }) {
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useEffect(() => {
@@ -110,7 +118,7 @@ function Transcript({ segments, partial }: { segments: { speakerId: string; spea
       }}
       className="card h-72 space-y-3 overflow-y-auto p-4 lg:h-[calc(100vh-13rem)]"
     >
-      {segments.length === 0 && !partial && <p className="text-sm muted">Waiting for the conversation to start…</p>}
+      {segments.length === 0 && !partial && <p className="text-sm muted">{done ? "No transcript was captured." : "Waiting for the conversation to start…"}</p>}
       {segments.map((s) => <Line key={`${s.speakerId}:${s.startMs}`} who={s.speakerName ?? s.role} role={s.role} text={s.text} at={clock(s.startMs)} />)}
       {partial && <Line who={partial.speakerName ?? partial.role} role={partial.role} text={partial.text} faded />}
     </div>

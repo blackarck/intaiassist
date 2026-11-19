@@ -16,36 +16,66 @@ provision per interview and no alias limit. Microsoft 365 is not involved.
 
 ## What you need to do by hand, in order
 
-### 1. DNS (registrar, `askproso.ai`)
-Enter only the host part (see [hosting.md](hosting.md)).
+Your domain `askproso.ai` is **already authenticated in SendGrid** (confirmed in DNS: `s1._domainkey` and `s2._domainkey`
+point to SendGrid account `u29064459`, and a DMARC record exists). SendGrid requires the Inbound Parse domain to be one of your
+authenticated domains, so that prerequisite is met.
 
-| Host | Type | Value | Notes |
+### 1. SendGrid: create an API key (about 3 minutes)
+
+1. Sign in at <https://app.sendgrid.com>. In the left menu open **Settings > API Keys**.
+2. Click **Create API Key**.
+3. **API Key Name:** `intassist-backend`.
+4. **API Key Permissions:** choose **Custom Access** (older screens call it "Restricted Access"). Do **not** choose Full Access.
+5. In the permission list tick:
+   - **Inbound Parse**: the category that holds the Inbound Parse settings permissions (internally `user.webhooks.parse.settings.create/read/update/delete`).
+     If you cannot find it, use the search box on that page for "parse".
+   - **Mail Send**: tick **Mail Send** (leave "Scheduled Sends" off). This is for the e-mails we send later.
+6. Click **Create & View**. The key is shown **once**. Keep that browser tab open until the next step is done.
+7. In a terminal, run `infra/sendgrid/store-api-key.sh`. It asks you to paste the key at a hidden prompt (nothing appears on
+   screen or in shell history), asks SendGrid what the key can do and prints YES/NO for each permission we need, and then stores it
+   in Key Vault as `sendgrid-api-key`. If you close the tab before storing it, delete that key and create a new one.
+
+### 2. DNS at your registrar: the MX record
+
+Add one MX record for the `invite` subdomain:
+
+| Host | Type | Value | Priority |
 |---|---|---|---|
-| `invite` | MX, priority **10** | `mx.sendgrid.net` | The only mail record for this subdomain. SendGrid's advice: use a hostname that serves no other purpose, and do not change this record once created. Do **not** touch the root domain's MX/SPF |
-| the 3 records SendGrid shows | CNAME | as shown | From step 2 |
+| `invite` | MX | `mx.sendgrid.net` | `10` |
 
-### 2. SendGrid dashboard
-1. **Confirm your plan includes Inbound Parse** (I have not verified this).
-2. **Settings > Sender Authentication > Authenticate Your Domain**: choose your DNS host, domain `askproso.ai`, and add the three
-   CNAME records it shows at your registrar, then click Verify. This is needed for sending e-mail, and SendGrid's API docs say
-   the Inbound Parse hostname "must be a domain already authenticated on your account". These CNAMEs do not replace or change
-   your existing root SPF record.
-3. **Settings > API Keys > Create**: a restricted key with the **Inbound Parse** permission (and **Mail Send**, for later).
-   Store it in Key Vault yourself; do not paste it anywhere:
-   ```bash
-   az keyvault secret set --vault-name vaiintassist-kv-f9ea --name sendgrid-api-key --value '<paste the key here>'
-   ```
-4. **Create the Inbound Parse host.** Either run `infra/sendgrid/configure-inbound-parse.sh` (it reads both secrets from
-   Key Vault; written from SendGrid's API reference, not yet run against a live account), or by hand:
-   **Settings > Inbound Parse > Add Host & URL**
-   - Receiving domain: `invite.askproso.ai`
-   - Destination URL: `https://intassistback.askproso.ai/inbound/sendgrid/<inbound-token>`
-     (the token is Key Vault secret `inbound-token`: `az keyvault secret show --vault-name vaiintassist-kv-f9ea --name inbound-token --query value -o tsv`)
-   - **Tick "POST the raw, full MIME message".** Without it the backend cannot read the calendar part and answers
-     `raw_mime_required` (and logs a warning).
-   - Spam check: off.
+**Careful at Namecheap.** Your DNS is at Namecheap's name servers (`registrar-servers.com`), and the root domain currently has
+Namecheap **Email Forwarding**. On *Domain List > Manage > Advanced DNS*, MX records are normally managed in the **Mail Settings**
+section, whose options include *Email Forwarding* and *Custom MX*. I could not confirm from Namecheap's own pages whether a
+subdomain MX can be added without changing the root domain's mail setup, and picking *Custom MX* may replace the forwarding setup.
+So:
+- First look at **Add New Record** in *Host Records*: if **MX Record** is offered there, use it (Host `invite`, Value `mx.sendgrid.net`, Priority `10`). Enter only `invite`, not the full name.
+- If MX records can only be added through **Mail Settings**, **stop and tell me what you see** before changing it.
+- Safety net, in case root mail forwarding is ever disturbed. The root domain's current MX records are
+  `10 eforward1.registrar-servers.com`, `10 eforward2.registrar-servers.com`, `10 eforward3.registrar-servers.com`,
+  `15 eforward4.registrar-servers.com`, `20 eforward5.registrar-servers.com`, with SPF
+  `v=spf1 include:spf.efwd.registrar-servers.com ~all`.
 
-### 3. Test
+After saving, tell me and I will check both `invite.askproso.ai` and the root domain's MX records.
+(New records usually take about 30 minutes.)
+
+### 3. SendGrid: create the Inbound Parse host
+
+**Option A: the dashboard.** Open **Settings > Inbound Parse** (direct link: <https://app.sendgrid.com/settings/parse>), then **Add Host & URL**:
+- **Receiving domain / Host name:** subdomain `invite`, and in the domain list choose `askproso.ai` (together: `invite.askproso.ai`).
+  Only your authenticated domains appear in that list.
+- **Destination URL:** `https://intassistback.askproso.ai/inbound/sendgrid/<inbound-token>`. Get the token with:
+  `az keyvault secret show --vault-name vaiintassist-kv-f9ea --name inbound-token --query value -o tsv`
+- **Check incoming emails for spam:** leave **off**.
+- **POST the raw, full MIME message:** tick **on**. Without it the backend cannot read the calendar part and answers `raw_mime_required`.
+- Save. The pair appears in a table; the gear icon on its right edits or removes it.
+
+**Option B: the script** `infra/sendgrid/configure-inbound-parse.sh` does the same through the API using the two Key Vault secrets
+(written from SendGrid's API reference; not yet run against a live account).
+
+SendGrid's docs add one warning that does **not** apply to us: if the receiving host were the same name as the domain you authenticated
+for sending, messages could loop between its CNAME and MX records. Ours is a different name (`invite.askproso.ai` vs `askproso.ai`).
+
+### 4. Test
 1. Create an interview: `curl -X POST https://intassistback.askproso.ai/api/interviews -H "authorization: Bearer $INTAKE_TOKEN" -H 'content-type: application/json' -d '{"ownerEmail":"you@yourcompany.com"}'` returns `address`.
 2. From your own Outlook or Google Calendar, create a meeting with a Teams/Meet/Zoom link and add `address` plus a second person.
 3. The backend answers `scheduled`, and a bot appears in Recall for that meeting (the Recall MCP tools or dashboard show it).

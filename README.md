@@ -58,6 +58,19 @@ curl -X POST localhost:3000/api/intake/link -H "authorization: Bearer $INTAKE_TO
 Recall can only deliver webhooks to a public HTTPS URL, so a real end-to-end test needs the backend hosted or tunnelled
 (see [doc/recall-integration.md](doc/recall-integration.md)).
 
+### Optional support payment (Stripe)
+
+People can optionally pay $5, $7 or $10; nothing is gated on it. To turn it on, put your keys in `backend/.env` (git-ignored):
+
+```
+STRIPE_SECRET_KEY=sk_test_...        # https://dashboard.stripe.com/apikeys
+WEB_BASE_URL=http://localhost:5173   # where Stripe sends people back
+```
+
+Leave `STRIPE_SECRET_KEY` empty and the web app shows no payment option. The backend creates a Stripe Checkout session
+(`POST /api/me/support/checkout`); amounts are fixed in `backend/src/support.ts`. For the Azure deploy, store the key as the
+Key Vault secret `stripe-secret-key`. Payments are not tracked in the database: the Stripe dashboard is the record.
+
 Tests: `cd backend && npm test` (and `npm run typecheck`).
 
 ## Verified live (2026-11-19)
@@ -69,3 +82,7 @@ live speaker-tagged transcript stored in SQLite (read it with `GET /api/intervie
 
 Payment/portal, a cloud database (SQLite for now, see doc/data.md), coaching (turn detection → scoring → follow-up questions), the
 Teams coaching chat, hosting/deployment, and Entra-based auth on `/api/*` (a shared bearer token is used for now).
+
+## License
+
+[Apache License 2.0](LICENSE): free to use, modify and distribute, including commercially.

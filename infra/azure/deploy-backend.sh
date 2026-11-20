@@ -115,6 +115,9 @@ umask 077
   echo "RECALL_WEBHOOK_SECRET=$(get recall-webhook-secret)"
   echo "INTAKE_TOKEN=$(get intake-token)"
   echo "INBOUND_TOKEN=$(get inbound-token)"
+  # optional support payment: an absent Key Vault secret gives an empty value, which leaves payments off
+  echo "WEB_BASE_URL=https://$WEB_DOMAIN"
+  echo "STRIPE_SECRET_KEY=$(get stripe-secret-key 2>/dev/null || true)"
 } > /opt/intassist/.env.new
 mv /opt/intassist/.env.new /opt/intassist/.env
 echo "env written ($(grep -c '=' /opt/intassist/.env) variables, mode $(stat -c %a /opt/intassist/.env))"

@@ -17,3 +17,15 @@ local/
 !.env.example
 *.pfx
 *.pem
+*.p12
+*.key
+*.crt
+id_rsa*
+
+# local databases and backups (hold interviews and transcripts: personal data)
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+data/
+

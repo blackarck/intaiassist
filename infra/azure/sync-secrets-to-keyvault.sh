@@ -23,6 +23,7 @@ mapping = {
     'recall-api-key':        ['RECALL_API_KEY', 'RECALL_AI_API_KEY'],
     'recall-webhook-secret': ['RECALL_WEBHOOK_SECRET', 'RECALL_VERI_SECRET'],
     'intake-token':          ['INTAKE_TOKEN'],
+    'stripe-secret-key':     ['STRIPE_SECRET_KEY'],
 }
 for secret, names in mapping.items():
     value = next((env[n] for n in names if env.get(n)), None)

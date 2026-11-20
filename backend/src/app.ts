@@ -19,6 +19,7 @@ import { handleRecallWebhook, verifyRecallSignature } from "./recallWebhook.js";
 import { openLive, sseFrame } from "./room/live.js";
 import type { RoomService } from "./room/service.js";
 import type { InboundMessageLog, Interview, TranscriptStore } from "./store.js";
+import type { SupportService } from "./support.js";
 
 /** Largest inbound e-mail we accept. Invites are tiny; anything near this is junk or a mail with big attachments. */
 const MAX_INBOUND_BYTES = 12 * 1024 * 1024;
@@ -62,6 +63,8 @@ export interface AppConfig extends IntakeDeps {
   room?: RoomService;
   /** AI coaching: settings store, run log and model factory. Without it the /api/admin/ai routes answer 501. */
   ai?: { config: AiConfigStore; log: AiRunLog; models: ModelFactory };
+  /** Optional Stripe "support us" payments. Without it the support routes report disabled / answer 501. */
+  support?: SupportService;
   /** Injectable clock for signature-timestamp checks (tests). */
   nowMs?: () => number;
 }
@@ -177,6 +180,21 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
   app.get("/api/me", async (req) => {
     const p = (req.auth as { kind: "user"; principal: Principal }).principal;
     return { email: p.email, name: p.name, provider: p.provider, subject: p.subject, isAdmin: isAdmin(req.auth!) };
+  });
+
+  // Optional voluntary payment ("support us"). Nothing is gated on it; see support.ts.
+  app.get("/api/me/support", async () => ({ enabled: !!cfg.support, amounts: cfg.support?.amounts ?? [] }));
+
+  app.post<{ Body: { amount?: number } }>("/api/me/support/checkout", async (req, reply) => {
+    if (!cfg.support) return reply.code(501).send({ error: "payments are not enabled" });
+    const amount = req.body?.amount;
+    if (typeof amount !== "number" || !cfg.support.amounts.includes(amount)) return reply.code(400).send({ error: `amount must be one of ${cfg.support.amounts.join(", ")}` });
+    try {
+      return { url: await cfg.support.createCheckout(amount) };
+    } catch (e) {
+      console.warn("[support] checkout failed:", (e as Error).message); // the Stripe message only: no key, no personal data
+      return reply.code(502).send({ error: "Could not start the payment. Try again in a moment." });
+    }
   });
 
   app.get("/api/me/interviews", async (req) => {

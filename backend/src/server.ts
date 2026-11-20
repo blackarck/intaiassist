@@ -8,6 +8,7 @@ import { RoomService } from "./room/service.js";
 import { InMemoryRoomStore } from "./room/types.js";
 import { SqliteStore } from "./sqliteStore.js";
 import { InMemoryStore } from "./store.js";
+import { stripeSupport } from "./support.js";
 
 const intakeToken = process.env.INTAKE_TOKEN;
 if (!intakeToken) {
@@ -81,7 +82,17 @@ if (process.env.DEV_AUTH === "1" && process.env.NODE_ENV === "production") {
 }
 if (verifiers.length === 0 && process.env.DEV_AUTH !== "1") console.warn("MS_CLIENT_ID / GOOGLE_CLIENT_ID not set: people cannot sign in (operator token only)");
 
+// Optional Stripe "support us" payments. Needs both values; with neither, the web app simply shows no support option.
+const { STRIPE_SECRET_KEY, WEB_BASE_URL } = process.env;
+if (STRIPE_SECRET_KEY && !WEB_BASE_URL) {
+  console.error("STRIPE_SECRET_KEY is set but WEB_BASE_URL is missing (where Stripe sends people back to)");
+  process.exit(1);
+}
+const support = STRIPE_SECRET_KEY && WEB_BASE_URL ? stripeSupport({ secretKey: STRIPE_SECRET_KEY, webBaseUrl: WEB_BASE_URL }) : undefined;
+if (!support) console.warn("STRIPE_SECRET_KEY not set: the optional support payment is disabled");
+
 const app = buildApp({
+  support,
   verifier: verifiers.length ? anyOf(...verifiers) : undefined,
   adminSubjects: list(process.env.ADMIN_SUBJECTS),
   allowedOrigins: list(process.env.ALLOWED_ORIGINS),

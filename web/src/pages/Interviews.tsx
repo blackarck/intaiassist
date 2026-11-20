@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, api } from "../api";
 import { ErrorNote, Spinner, StatusBadge, when } from "../components/ui";
+import { SupportCard } from "../components/Support";
 import { TodayMeetings } from "../components/TodayMeetings";
 import { useInterviews } from "../hooks";
 import type { InterviewSummary } from "../types";
@@ -44,6 +45,7 @@ export function InterviewsPage() {
         <button className="btn-primary" onClick={create} disabled={creating}>{creating ? "Creating…" : "New interview"}</button>
       </div>
       <TodayMeetings />
+      <SupportCard />
       {createError && <ErrorNote>{createError}</ErrorNote>}
       <h2 className="text-lg font-semibold tracking-tight">Your interviews</h2>
       {loading && <Spinner />}

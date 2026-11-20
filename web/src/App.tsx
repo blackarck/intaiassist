@@ -1,15 +1,19 @@
-import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth";
 import { Spinner } from "./components/ui";
 import { useMe } from "./hooks";
 import { AdminPage } from "./pages/Admin";
 import { InterviewPage } from "./pages/Interview";
 import { InterviewsPage } from "./pages/Interviews";
+import { PrivacyPage, TermsPage } from "./pages/Legal";
 import { LoginPage } from "./pages/Login";
 
 function Shell() {
   const auth = useAuth();
   const me = useMe();
+  const { pathname } = useLocation();
+  if (pathname === "/terms") return <TermsPage />;
+  if (pathname === "/privacy") return <PrivacyPage />;
   if (auth.status === "loading") return <div className="grid min-h-screen place-items-center"><Spinner /></div>;
   if (auth.status === "signedOut") return <LoginPage />;
   const link = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? "bg-zinc-200 dark:bg-zinc-800" : "muted hover:text-zinc-900 dark:hover:text-zinc-100"}`;

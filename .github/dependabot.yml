@@ -1,0 +1,12 @@
+# Weekly pull requests for outdated or vulnerable dependencies. Security updates are also raised immediately by GitHub itself.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /backend
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: /web
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /backend
+    schedule: { interval: weekly }

@@ -16,6 +16,12 @@ if (!intakeToken) {
   process.exit(1);
 }
 
+// The operator token guards every non-user /api route. A short or guessable one is brute-forceable, so refuse it in production.
+if (process.env.NODE_ENV === "production" && intakeToken.length < 24) {
+  console.error("INTAKE_TOKEN must be at least 24 characters in production (use: openssl rand -hex 32)");
+  process.exit(1);
+}
+
 const aliasDomain = process.env.ALIAS_DOMAIN ?? "example.com";
 
 // Recall.ai. Either all of these are set, or none (local development: bots are logged, not created).
@@ -93,6 +99,8 @@ if (!support) console.warn("STRIPE_SECRET_KEY not set: the optional support paym
 
 const app = buildApp({
   support,
+  // In production the backend is reachable only through Caddy (see deploy/docker-compose.yml), so its forwarded client address can be trusted.
+  trustProxy: process.env.NODE_ENV === "production",
   verifier: verifiers.length ? anyOf(...verifiers) : undefined,
   adminSubjects: list(process.env.ADMIN_SUBJECTS),
   allowedOrigins: list(process.env.ALLOWED_ORIGINS),

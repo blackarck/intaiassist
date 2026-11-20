@@ -1,11 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import multipart from "@fastify/multipart";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { allEffectiveConfigs, type AiConfigStore, type AiRunLog, type TaskOverride } from "./ai/configStore.js";
 import { CATALOG, findModel, type ModelFactory } from "./ai/models.js";
 import { runTask } from "./ai/runner.js";
 import { TASKS, getTask, taskNames } from "./ai/tasks/index.js";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 import type { Auth, Principal, TokenVerifier } from "./auth.js";
 import { aliasAddress, generateAlias } from "./alias.js";
@@ -65,6 +67,10 @@ export interface AppConfig extends IntakeDeps {
   ai?: { config: AiConfigStore; log: AiRunLog; models: ModelFactory };
   /** Optional Stripe "support us" payments. Without it the support routes report disabled / answer 501. */
   support?: SupportService;
+  /** Trust X-Forwarded-For from the reverse proxy (Caddy), so rate limits see the real client. Only set it when the proxy is the sole way in. */
+  trustProxy?: boolean;
+  /** Max /api requests per client address per minute (default 600). Webhooks and inbound e-mail are not limited here. */
+  rateLimitPerMinute?: number;
   /** Injectable clock for signature-timestamp checks (tests). */
   nowMs?: () => number;
 }
@@ -83,9 +89,38 @@ function tokenOk(header: string | undefined, expected: string): boolean {
 }
 
 export function buildApp(cfg: AppConfig): FastifyInstance {
-  const app = Fastify({ logger: false, bodyLimit: 5 * 1024 * 1024 });
+  const app = Fastify({ logger: false, bodyLimit: 5 * 1024 * 1024, trustProxy: cfg.trustProxy ?? false });
+
+  // Standard security headers (nosniff, no framing, no referrer, ...). This is a JSON API, so the default CSP is already strict.
+  // CORP is relaxed to cross-origin because the web app on another origin reads these responses (CORS still decides who may).
+  app.register(helmet, { crossOriginResourcePolicy: { policy: "cross-origin" } });
+  // Brute-force and abuse guard for the authenticated API. Recall webhooks (many events per second, HMAC-signed) and SendGrid
+  // inbound mail are outside /api/ and are protected by their own secrets instead.
+  app.register(rateLimit, { global: false });
+  let limitApi: (req: FastifyRequest, reply: FastifyReply) => Promise<void> = async () => {};
+  // Checkout gets its own tiny counter (10 a minute per client): a second instance of the plugin's limiter shares state with the first.
+  const checkoutHits = new Map<string, { n: number; resetAt: number }>();
+  const checkoutLimited = (key: string): boolean => {
+    const now = Date.now();
+    for (const [k, v] of checkoutHits) if (v.resetAt <= now) checkoutHits.delete(k);
+    const hit = checkoutHits.get(key) ?? { n: 0, resetAt: now + 60_000 };
+    hit.n++;
+    checkoutHits.set(key, hit);
+    return hit.n > 10;
+  };
 
   app.get("/health", async () => ({ ok: true }));
+
+  // Never show internals to a caller: server-side failures answer with a fixed message (details go to the log, message only).
+  // 4xx errors (bad input, rate limit, auth) keep their own message because the web app shows it to the person.
+  app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
+    const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+    if (status >= 500) {
+      console.error("[error]", err.message);
+      return reply.code(status).send({ error: "internal error" });
+    }
+    return reply.code(status).send({ error: err.message });
+  });
 
   app.register(cors, { origin: cfg.allowedOrigins ?? false, methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], allowedHeaders: ["authorization", "content-type", "last-event-id"], maxAge: 600 });
 
@@ -113,8 +148,14 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
    *  /api/admin/*                   the operator or an admin login
    *  everything else under /api     the operator only (intake, creating interviews for others, dev routes)
    */
+  // Added via after() so the rate limiter exists by then. The limiter runs first, so rejected logins are counted too.
+  app.after(() => {
+    const make = (max: number) => app.rateLimit({ max, timeWindow: "1 minute" }) as unknown as typeof limitApi;
+    limitApi = make(cfg.rateLimitPerMinute ?? 600);
+  });
   app.addHook("onRequest", async (req, reply) => {
     if (req.method === "OPTIONS" || !req.url.startsWith("/api/")) return;
+    await limitApi(req, reply);
     const auth = await authenticate(req.headers.authorization);
     if (!auth) return reply.code(401).send({ error: "unauthorized" });
     req.auth = auth;
@@ -186,6 +227,7 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
   app.get("/api/me/support", async () => ({ enabled: !!cfg.support, amounts: cfg.support?.amounts ?? [] }));
 
   app.post<{ Body: { amount?: number } }>("/api/me/support/checkout", async (req, reply) => {
+    if (checkoutLimited(req.ip)) return reply.code(429).send({ error: "too many attempts, try again in a minute" });
     if (!cfg.support) return reply.code(501).send({ error: "payments are not enabled" });
     const amount = req.body?.amount;
     if (typeof amount !== "number" || !cfg.support.amounts.includes(amount)) return reply.code(400).send({ error: `amount must be one of ${cfg.support.amounts.join(", ")}` });

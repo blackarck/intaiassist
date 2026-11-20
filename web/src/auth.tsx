@@ -9,6 +9,14 @@ const msal = config.msClientId
   ? new PublicClientApplication({ auth: { clientId: config.msClientId, authority: config.msAuthority, redirectUri: `${window.location.origin}/redirect.html` }, cache: { cacheLocation: "localStorage" } })
   : undefined;
 
+function clearStaleInteraction() {
+  for (const store of [window.sessionStorage, window.localStorage]) {
+    try {
+      Object.keys(store).filter((k) => k.includes("interaction.status")).forEach((k) => store.removeItem(k));
+    } catch { /* storage unavailable */ }
+  }
+}
+
 interface AuthState {
   status: "loading" | "signedOut" | "signedIn";
   name?: string;
@@ -61,8 +69,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async () => {
     if (!msal) return;
     setError(undefined);
+    const attempt = () => msal.loginPopup({ scopes: SCOPES, prompt: "select_account" });
     try {
-      const r = await msal.loginPopup({ scopes: SCOPES, prompt: "select_account" });
+      let r;
+      try {
+        r = await attempt();
+      } catch (e) {
+        // A popup that was closed or interrupted can leave msal's "interaction in progress" flag behind, which blocks every later sign-in. Clear it and retry once.
+        if ((e as { errorCode?: string }).errorCode !== "interaction_in_progress") throw e;
+        clearStaleInteraction();
+        r = await attempt();
+      }
       setAccount(r.account);
       setStatus("signedIn");
     } catch (e) {
@@ -88,9 +105,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (config.devUser) return;
-    await msal?.logoutPopup({ account }).catch(() => undefined);
+    try {
+      await msal?.logoutPopup({ account, mainWindowRedirectUri: `${window.location.origin}/` });
+    } catch {
+      clearStaleInteraction();
+      await msal?.clearCache({ account }).catch(() => undefined);
+    }
     setAccount(undefined);
     setStatus("signedOut");
+    // Always land on the login page, not on whatever interview URL we were on.
+    window.history.replaceState(null, "", "/");
   }, [account]);
 
   const value = useMemo<AuthState>(

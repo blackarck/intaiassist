@@ -60,3 +60,40 @@ describe("optional support payment", () => {
     expect((await app.inject({ method: "POST", url: "/api/me/support/checkout", payload: { amount: 5 } })).statusCode).toBe(401);
   });
 });
+
+describe("security middleware", () => {
+  it("sends security headers and rate-limits /api per client", async () => {
+    const store = new InMemoryStore();
+    const app = buildApp({ store, transcripts: store, controller: fakeController(), aliasDomain: "invite.example.com", intakeToken: "op", enableDevRoutes: false, rateLimitPerMinute: 3 });
+    const ok = await app.inject({ method: "GET", url: "/health" });
+    expect(ok.headers["x-content-type-options"]).toBe("nosniff");
+    expect(ok.headers["x-frame-options"]).toBeDefined();
+    const codes = [];
+    for (let i = 0; i < 5; i++) codes.push((await app.inject({ method: "GET", url: "/api/me" })).statusCode);
+    expect(codes).toEqual([401, 401, 401, 429, 429]);
+    for (let i = 0; i < 5; i++) expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200); // not limited
+  });
+});
+
+describe("checkout rate limit", () => {
+  it("allows 10 checkout attempts a minute, independent of the general API limit", async () => {
+    const { app, headers } = setup(stripeSupport({ secretKey: "sk_test_placeholder", webBaseUrl: "https://app.example.com", fetch: stripeOk() as never }));
+    const codes: number[] = [];
+    for (let i = 0; i < 12; i++) codes.push((await app.inject({ method: "POST", url: "/api/me/support/checkout", headers, payload: { amount: 5 } })).statusCode);
+    expect(codes.filter((c) => c === 200)).toHaveLength(10);
+    expect(codes.slice(10)).toEqual([429, 429]);
+    expect((await app.inject({ method: "GET", url: "/api/me/support", headers })).statusCode).toBe(200);
+  });
+});
+
+describe("error handling", () => {
+  it("hides internal error messages from callers", async () => {
+    const store = new InMemoryStore();
+    store.listByOwner = async () => { throw new Error("SQLITE_CORRUPT: secret internal detail"); };
+    const app = buildApp({ store, transcripts: store, controller: fakeController(), aliasDomain: "invite.example.com", intakeToken: "op", enableDevRoutes: false, devAuth: true });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await app.inject({ method: "GET", url: "/api/me/interviews", headers: { authorization: "Dev a@example.com" } });
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toBe('{"error":"internal error"}');
+  });
+});

@@ -25,7 +25,7 @@ npm run build                  # static files in dist/
 
 Register an application in Entra ID:
 
-- Platform **Single-page application**; redirect URIs `http://localhost:5173` and `https://intassist.askproso.ai`.
+- Platform **Single-page application**; redirect URIs `http://localhost:5173/redirect.html` and `https://intassist.askproso.ai/redirect.html` (the app signs in through a popup that returns to `/redirect.html`, so the bare origin is not enough).
 - Supported account types: **work/school accounts in any tenant and personal Microsoft accounts** (interviewers come from many
   companies). Authority `https://login.microsoftonline.com/common`.
 - No API permissions beyond the default `User.Read`; the app only needs the ID token (`openid profile email`).

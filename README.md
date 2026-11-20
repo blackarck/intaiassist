@@ -1,9 +1,9 @@
 # AI Interview Assist
 
-An AI assistant for interviewers. A bot joins the interview video call (Microsoft Teams, Zoom or Google Meet), listens,
+An AI assistant for interviewers. A bot joins the interview video call (Microsoft Teams for now soon to come Zoom or Google Meet), listens,
 and privately coaches the interviewer in a web app: a **live transcript**, a **score for every answer** (correctness, depth,
 clarity, relevance, with the weak phrases quoted and a better answer suggested), and **follow-up questions to ask next**.
-The assistant never speaks in the meeting, and only the interviewer sees the coaching.
+The assistant never speaks in the meeting, and only the interviewer sees the coaching in web app.
 
 Meeting access and live transcription come from [Recall.ai](https://docs.recall.ai). AI analysis uses Anthropic Claude and
 Azure OpenAI models. This repo contains the backend that schedules the bot, receives the transcript and runs the AI, plus the
@@ -29,7 +29,7 @@ web app interviewers use.
     appear only when `STRIPE_SECRET_KEY` is set.
   - **Try it** on your own interviews and **report bugs** or rough edges as GitHub issues.
   - **Contribute code, tests, docs or fixes** by pull request, or help maintain it.
-  - **Run your own copy** (below) with your own Recall.ai and AI keys, so it costs you rather than me.
+  - **Run your own copy** (below) with your own Recall.ai, Infra & AI keys.
 
 Docs: [plan](doc/plan.md) · [hosting & DNS](doc/hosting.md) · [inbound e-mail](doc/inbound-email.md) · [Recall integration](doc/recall-integration.md) · [data & backups](doc/data.md) · [end-to-end flow](doc/flow.md) ·
 [why not our own Teams bot](doc/bot-join-research.md).

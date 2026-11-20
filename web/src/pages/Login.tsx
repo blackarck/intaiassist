@@ -63,16 +63,16 @@ export function LoginPage() {
           <div className="space-y-5">
             <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">A second pair of ears for every interview.</h1>
             <p className="text-lg muted">
-              Interview Assist helps interviewers run better, fairer conversations. It follows your Teams, Zoom or Google Meet interview live, assesses each answer as it is given, and suggests the follow-up questions that will help you make a confident decision.
+              Interview Assist helps interviewers with conversation. It follows your Teams (to come - Zoom or Google Meet) interview live assesses each answer as it is given, and suggests the follow-up questions that will assist you with decision.
             </p>
           </div>
           <div className="card space-y-4 p-6 shadow-md">
             <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-400">Interviewer sign-in</p>
             <h2 className="text-xl font-semibold tracking-tight">Start your next interview</h2>
-            <p className="text-sm muted">Sign in with Microsoft to set up an interview and invite the assistant. Work, school and personal accounts are supported.</p>
+            <p className="text-sm muted">Sign in with Microsoft to set up an interview and invite the assistant.</p>
             {error && <ErrorNote>{error}</ErrorNote>}
             <SignInButton className="btn-primary w-full" />
-            <p className="text-xs muted">By continuing you agree to the <Link className="underline" to="/terms">Terms of Service</Link> and <Link className="underline" to="/privacy">Privacy Policy</Link>, and confirm you will get everyone's consent before recording an interview.</p>
+            <p className="text-xs muted">By continuing you agree to the <Link className="underline" to="/terms">Terms of Service</Link> and <Link className="underline" to="/privacy">Privacy Policy</Link>, get everyone's consent before recording an interview.</p>
           </div>
         </section>
 
@@ -98,10 +98,24 @@ export function LoginPage() {
         <section id="how-it-works" className="space-y-6 scroll-mt-6">
           <h2 className="text-2xl font-semibold tracking-tight">How it works</h2>
           <ol className="space-y-5">
-            <Step n={1} title="Sign in and add your interview">Sign in with Microsoft, paste the meeting link and add the role and what you want to assess.</Step>
-            <Step n={2} title="A bot joins your meeting">At the start time, a meeting bot named “Interview Assist” joins your call as a participant. Please admit it from the lobby, otherwise it cannot hear the conversation and nothing will work.</Step>
-            <Step n={3} title="Coaching appears on your screen">Only you see the transcript, scores and suggested questions. The assistant never speaks or types in the meeting.</Step>
+            <Step n={1} title="Sign in and add your interview">Sign in with Microsoft, invite the offered bot emailid to interview, optionally add the role and what you want to assess.</Step>
+            <Step n={2} title="A bot joins your meeting">At the start time, a meeting bot  “Interview Assist” joins your call as a participant. Please admit it from the lobby</Step>
+            <Step n={3} title="Coaching appears on your screen">Only you see the transcript, scores and suggested questions on the portal. The assistant never speaks or types in the Team's meeting.</Step>
           </ol>
+
+          <figure className="space-y-3">
+            <img
+              src="/invite-screenshot.png"
+              alt="An interview in Interview Assist showing the bot's email address to add to your meeting invite, with a Copy address button, and a note that the assistant joins a minute before the start and listens only."
+              className="w-full rounded-xl border border-zinc-200 shadow-lg dark:border-zinc-800"
+            />
+            <figcaption className="text-sm muted">Each interview gets its own bot address. Invite it like any attendee from Teams, Zoom or Google Calendar. The assistant joins a minute before the start; in Teams, admit it from the lobby. It listens only and never speaks in the meeting.</figcaption>
+          </figure>
+
+          <div className="card space-y-1 p-5">
+            <h3 className="font-semibold">Your Teams calendar, shown only to you</h3>
+            <p className="text-sm muted">If you allow it, your Microsoft (Teams) calendar for today appears in the app, so you can send the bot into a meeting with one click instead of copying addresses. It is read directly from Microsoft in your browser, only you see it, and we only use the meeting link of the meeting you choose. Entirely optional: you are asked for permission first, and the invite address above works without it.</p>
+          </div>
         </section>
 
         <section id="consent" className="card scroll-mt-6 space-y-3 border-indigo-200 bg-indigo-50/60 p-6 dark:border-indigo-900 dark:bg-indigo-950/30">
@@ -110,7 +124,7 @@ export function LoginPage() {
             A visible bot will appear in the participant list and the meeting is recorded and transcribed. <strong>Before you use Interview Assist, tell the candidate and every other participant that the meeting will be recorded and analysed by an AI tool, and get their permission.</strong> Recording laws differ by country and state, and some require consent from everyone on the call. Using the tool is entirely at your own risk and you are responsible for complying with them.
           </p>
           <p className="text-sm muted">
-            Audio and transcripts are handled by our meeting-bot provider, <a className="underline" href="https://www.recall.ai" target="_blank" rel="noreferrer">Recall.ai</a>, and analysed by our AI, which stores interview data in our private AI cloud. See the <Link className="underline" to="/privacy">Privacy Policy</Link> and <Link className="underline" to="/terms">Terms of Service</Link> for details.
+            Audio and transcripts are handled by our meeting-bot provider, <a className="underline" href="https://www.recall.ai" target="_blank" rel="noreferrer">Recall.ai</a>, and analysed by our AI, which stores interview data in our private AI cloud (for suggestions). See the <Link className="underline" to="/privacy">Privacy Policy</Link> and <Link className="underline" to="/terms">Terms of Service</Link> for details.
           </p>
         </section>
       </main>

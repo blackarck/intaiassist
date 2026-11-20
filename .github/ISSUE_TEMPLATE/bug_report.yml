@@ -1,0 +1,23 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping. **Do not paste interview transcripts, candidate details, API keys or tokens.** Security problems go through the private advisory link instead.
+  - type: textarea
+    id: what
+    attributes: { label: What happened, description: What you did, what you expected and what you saw instead }
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes: { label: Steps to reproduce }
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where are you running it
+      options: [Hosted instance, Self-hosted, Local development]
+  - type: textarea
+    id: logs
+    attributes: { label: Relevant logs or screenshots, description: Remove anything private first }

@@ -46,7 +46,7 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * - 4xx other than 429 never fails over.
  * The task's deadline bounds everything; a fast task that cannot finish in time returns `timeout` instead of arriving late.
  */
-export async function runTask(deps: RunnerDeps, taskName: string, rawInput: unknown, opts: { interviewId?: string } = {}): Promise<AiResult> {
+export async function runTask(deps: RunnerDeps, taskName: string, rawInput: unknown, opts: { interviewId?: string; /** Catalog id the interviewer picked for this interview: tried first. */ model?: string } = {}): Promise<AiResult> {
   const now = deps.now ?? Date.now;
   const started = now();
   const attempts: AiRun["attempts"] = [];
@@ -89,7 +89,8 @@ export async function runTask(deps: RunnerDeps, taskName: string, rawInput: unkn
   const deadline = started + cfg.deadlineMs;
 
   // Attempt plan: primary, primary again (outage or bad output, once), then the fallback (twice at most, same rules).
-  const plan: string[] = [cfg.primary, cfg.fallback];
+  // An interviewer's own choice goes first; the task's fallback (or its primary, when the choice IS the fallback) backs it up.
+  const plan: string[] = opts.model && findModel(opts.model) ? [opts.model, opts.model === cfg.fallback ? cfg.primary : cfg.fallback] : [cfg.primary, cfg.fallback];
   let feedback: string | undefined;
   let lastFailure: Failure = "error";
   let lastMessage = "no attempt was made";

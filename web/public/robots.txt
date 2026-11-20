@@ -1,0 +1,8 @@
+# Public pages may be crawled by search engines and AI assistants. The signed-in app has nothing to index.
+User-agent: *
+Allow: /
+Disallow: /i/
+Disallow: /admin
+Disallow: /redirect.html
+
+Sitemap: https://intassist.askproso.ai/sitemap.xml

@@ -64,7 +64,7 @@ export interface AppConfig extends IntakeDeps {
   /** The live coaching room. Without it the room routes answer 501. */
   room?: RoomService;
   /** AI coaching: settings store, run log and model factory. Without it the /api/admin/ai routes answer 501. */
-  ai?: { config: AiConfigStore; log: AiRunLog; models: ModelFactory };
+  ai?: { config: AiConfigStore; log: AiRunLog; models: ModelFactory; /** Catalog ids people may pick per interview (providers with credentials). Unset = none, only the defaults. */ available?: string[] };
   /** Optional Stripe "support us" payments. Without it the support routes report disabled / answer 501. */
   support?: SupportService;
   /** Trust X-Forwarded-For from the reverse proxy (Caddy), so rate limits see the real client. Only set it when the proxy is the sole way in. */
@@ -224,6 +224,9 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
   });
 
   // Optional voluntary payment ("support us"). Nothing is gated on it; see support.ts.
+  // The models a person may choose for their own interview (only providers this server has credentials for).
+  app.get("/api/me/ai-models", async () => ({ models: CATALOG.filter((m) => cfg.ai?.available?.includes(m.id)).map((m) => ({ id: m.id, label: m.label })) }));
+
   app.get("/api/me/support", async () => ({ enabled: !!cfg.support, amounts: cfg.support?.amounts ?? [] }));
 
   app.post<{ Body: { amount?: number } }>("/api/me/support/checkout", async (req, reply) => {
@@ -393,6 +396,7 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
     roleLevel: z.string().max(60).optional(),
     jd: z.string().max(20_000),
     resumeSummary: z.string().max(20_000).optional(),
+    aiModel: z.string().max(80).optional(),
     presetQuestions: z.array(z.object({ text: z.string().min(1).max(600), keyPoints: z.array(z.string().max(300)).max(12).optional() })).max(20).default([]),
   });
 
@@ -408,6 +412,7 @@ export function buildApp(cfg: AppConfig): FastifyInstance {
     if (!room) return;
     const parsed = SetupBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; ") });
+    if (parsed.data.aiModel && !cfg.ai?.available?.includes(parsed.data.aiModel)) return reply.code(400).send({ error: "aiModel: that model is not available" });
     return { questions: await room.configure({ interviewId: req.params.id, ...parsed.data }) };
   });
 

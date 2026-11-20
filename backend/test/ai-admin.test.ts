@@ -40,9 +40,9 @@ describe("admin AI routes", () => {
 
   it("lists the model catalog and each task's effective settings", async () => {
     const body = (await call("GET", "/api/admin/ai/config")).json();
-    expect(body.models.length).toBeGreaterThan(5);
+    expect(body.models.length).toBeGreaterThan(0);
     expect(Object.keys(body.tasks).sort()).toEqual(["assist", "live_coach", "opening_questions", "score_answer", "scorecard"]);
-    expect(body.tasks.score_answer).toMatchObject({ enabled: true, primary: "anthropic:sonnet" });
+    expect(body.tasks.score_answer).toMatchObject({ enabled: true, primary: "azure:gpt-6-luna" });
   });
 
   it("saves a change, validates it, and can reset it", async () => {

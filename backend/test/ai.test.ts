@@ -55,14 +55,36 @@ function deps(factory: ModelFactory) {
 
 describe("runTask", () => {
   it("returns a validated answer and logs the run without any content", async () => {
-    const { factory } = scripted({ "anthropic:sonnet": [goodScore] });
+    const { factory } = scripted({ "azure:gpt-6-luna": [goodScore] });
     const { store, d } = deps(factory);
     const res = await runTask(d, "score_answer", TASKS.score_answer.sample, { interviewId: "i-1" });
     expect(res.ok).toBe(true);
-    if (res.ok) expect(res.model).toBe("anthropic:sonnet");
+    if (res.ok) expect(res.model).toBe("azure:gpt-6-luna");
     const [run] = await store.recent(1);
     expect(run).toMatchObject({ task: "score_answer", interviewId: "i-1", ok: true, outcome: "ok", inputTokens: 100, outputTokens: 20 });
     expect(JSON.stringify(run)).not.toContain("connection"); // no prompt or answer text in the log
+  });
+
+  it("tries the model the interviewer picked first, and falls back to the task's own models if it fails", async () => {
+    const pin = async (d: ReturnType<typeof deps>) => d.store.setOverride("score_answer", { primary: "azure:gpt-5.4-mini", fallback: "anthropic:haiku" });
+    const ok = deps(scripted({ "azure:gpt-6-luna": [goodScore], "azure:gpt-5.4-mini": [goodScore] }).factory);
+    await pin(ok);
+    const picked = await runTask(ok.d, "score_answer", TASKS.score_answer.sample, { model: "azure:gpt-6-luna" });
+    expect(picked.ok && picked.model).toBe("azure:gpt-6-luna");
+
+    const s = scripted({ "azure:gpt-6-luna": [httpError(500)], "anthropic:haiku": [goodScore] });
+    const broken = deps(s.factory);
+    await pin(broken);
+    const res = await runTask(broken.d, "score_answer", TASKS.score_answer.sample, { model: "azure:gpt-6-luna" });
+    expect(res.ok && res.model).toBe("anthropic:haiku");
+    expect(s.calls["azure:gpt-5.4-mini"]).toBeUndefined(); // the task's primary is skipped: the pick replaced it
+  });
+
+  it("ignores an unknown model id and uses the task defaults", async () => {
+    const x = deps(scripted({ "azure:gpt-5.4-mini": [goodScore] }).factory);
+    await x.store.setOverride("score_answer", { primary: "azure:gpt-5.4-mini", fallback: "anthropic:haiku" });
+    const res = await runTask(x.d, "score_answer", TASKS.score_answer.sample, { model: "nope:model" });
+    expect(res.ok && res.model).toBe("azure:gpt-5.4-mini");
   });
 
   it("rejects invalid input by path and rule, never echoing the value, before calling any model", async () => {
@@ -75,37 +97,37 @@ describe("runTask", () => {
   });
 
   it("retries the same model once after an outage, then succeeds", async () => {
-    const { factory, calls } = scripted({ "anthropic:sonnet": [httpError(503), goodScore] });
+    const { factory, calls } = scripted({ "azure:gpt-6-luna": [httpError(503), goodScore] });
     const { d } = deps(factory);
     const res = await runTask(d, "score_answer", TASKS.score_answer.sample);
     expect(res.ok).toBe(true);
-    expect(calls["anthropic:sonnet"]).toBe(2);
+    expect(calls["azure:gpt-6-luna"]).toBe(2);
     expect(res.attempts.map((a) => a.outcome)).toEqual(["outage", "ok"]);
   });
 
   it("falls back to the second model when the primary keeps failing", async () => {
-    const { factory, calls } = scripted({ "anthropic:sonnet": [httpError(503)], "azure:gpt-5.4": [goodScore] });
+    const { factory, calls } = scripted({ "azure:gpt-6-luna": [httpError(503)], "anthropic:haiku": [goodScore] });
     const { d } = deps(factory);
     const res = await runTask(d, "score_answer", TASKS.score_answer.sample);
-    expect(res.ok && res.model).toBe("azure:gpt-5.4");
-    expect(calls["anthropic:sonnet"]).toBe(2);
+    expect(res.ok && res.model).toBe("anthropic:haiku");
+    expect(calls["azure:gpt-6-luna"]).toBe(2);
   });
 
   it("does NOT fail over on a client error (our request is wrong)", async () => {
-    const { factory, calls } = scripted({ "anthropic:sonnet": [httpError(400)], "azure:gpt-5.4": [goodScore] });
+    const { factory, calls } = scripted({ "azure:gpt-6-luna": [httpError(400)], "anthropic:haiku": [goodScore] });
     const { d } = deps(factory);
     const res = await runTask(d, "score_answer", TASKS.score_answer.sample);
     expect(res).toMatchObject({ ok: false, error: { code: "client_error" } });
-    expect(calls["azure:gpt-5.4"]).toBeUndefined();
+    expect(calls["anthropic:haiku"]).toBeUndefined();
   });
 
   it("feeds a finalize rejection back once: quotes that are not in the answer are refused", async () => {
     const fabricated = { ...goodScore, evidenceQuotes: ["this sentence was never said"] };
-    const { factory, calls } = scripted({ "anthropic:sonnet": [fabricated, goodScore] });
+    const { factory, calls } = scripted({ "azure:gpt-6-luna": [fabricated, goodScore] });
     const { d } = deps(factory);
     const res = await runTask(d, "score_answer", TASKS.score_answer.sample);
     expect(res.ok).toBe(true);
-    expect(calls["anthropic:sonnet"]).toBe(2);
+    expect(calls["azure:gpt-6-luna"]).toBe(2);
   });
 
   it("does not retry a model whose answer was cut off by the token limit; it goes to the fallback", async () => {
@@ -115,26 +137,26 @@ describe("runTask", () => {
         modelId: spec.name,
         doGenerate: async () => {
           calls[spec.id] = (calls[spec.id] ?? 0) + 1;
-          const cut = spec.id === "anthropic:sonnet";
+          const cut = spec.id === "azure:gpt-6-luna";
           return { content: [{ type: "text", text: cut ? '{"verdict": "The answer is cor' : JSON.stringify(goodScore) }], finishReason: { unified: cut ? "length" : "stop", raw: cut ? "length" : "stop" }, usage: { inputTokens: { total: 5 }, outputTokens: { total: 5 } }, warnings: [] } as never;
         },
       });
     const { d } = deps(factory);
     const res = await runTask(d, "score_answer", TASKS.score_answer.sample);
-    expect(res.ok && res.model).toBe("azure:gpt-5.4");
-    expect(calls["anthropic:sonnet"]).toBe(1); // not twice
+    expect(res.ok && res.model).toBe("anthropic:haiku");
+    expect(calls["azure:gpt-6-luna"]).toBe(1); // not twice
     expect(res.attempts.map((a) => a.outcome)).toEqual(["truncated", "ok"]);
   });
 
   it("reports invalid_output when every model keeps returning rubbish", async () => {
-    const { factory } = scripted({ "anthropic:sonnet": ["not json"], "azure:gpt-5.4": [{ score: 9 }] });
+    const { factory } = scripted({ "azure:gpt-6-luna": ["not json"], "anthropic:haiku": [{ score: 9 }] });
     const { d } = deps(factory);
     const res = await runTask(d, "score_answer", TASKS.score_answer.sample);
     expect(res).toMatchObject({ ok: false, error: { code: "invalid_output" } });
   });
 
   it("honours the per-task kill switch", async () => {
-    const { factory, calls } = scripted({ "anthropic:sonnet": [goodScore] });
+    const { factory, calls } = scripted({ "azure:gpt-6-luna": [goodScore] });
     const { store, d } = deps(factory);
     await store.setOverride("score_answer", { enabled: false });
     expect(await runTask(d, "score_answer", TASKS.score_answer.sample)).toMatchObject({ ok: false, error: { code: "disabled" } });

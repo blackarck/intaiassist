@@ -14,6 +14,23 @@ web app interviewers use.
 > processed by Recall.ai and your AI providers, and stored in your own database. You run it at your own risk; see the in-app
 > Terms and Privacy pages (`web/src/pages/Legal.tsx`) and adapt them to your situation.
 
+## Read this first: risks and how you can help
+
+- **Vibe-coded, open source, use at your own risk.** This application was built largely with AI assistance. I took care to
+  close gaps (there are tests, and sign-in, access control and webhook verification were reviewed), but it has not had an
+  independent security audit and there are surely bugs. Do not treat its scores or suggestions as the basis for a hiring
+  decision, and do not rely on it to keep or recover data (see the Terms in the app).
+- **Get consent.** Tell candidates and everyone on the call that a bot will join and that the meeting is recorded,
+  transcribed and analysed by AI, and get their permission first.
+- **It is self-hosted and I pay for it.** The hosted instance runs on my own infrastructure: I pay for the meeting bot
+  (Recall.ai) and the AI models. If it helps your interviews, please consider contributing:
+  - **Pay what you like through Stripe** ($5, $7 or $10) from the app. Nothing is gated on it. The app shows a small,
+    optional "found it useful?" line under the interview setup form and a card on the Interviews page; the $ amounts
+    appear only when `STRIPE_SECRET_KEY` is set.
+  - **Try it** on your own interviews and **report bugs** or rough edges as GitHub issues.
+  - **Contribute code, tests, docs or fixes** by pull request, or help maintain it.
+  - **Run your own copy** (below) with your own Recall.ai and AI keys, so it costs you rather than me.
+
 Docs: [plan](doc/plan.md) · [hosting & DNS](doc/hosting.md) · [inbound e-mail](doc/inbound-email.md) · [Recall integration](doc/recall-integration.md) · [data & backups](doc/data.md) · [end-to-end flow](doc/flow.md) ·
 [why not our own Teams bot](doc/bot-join-research.md).
 
@@ -117,6 +134,51 @@ Web settings are build-time variables in `web/.env.local` (see [web/.env.example
 
 More detail in [web/README.md](web/README.md).
 
+## Hook up your own Recall.ai and AI models
+
+Running your own copy means using your own accounts. Everything is set in `backend/.env` (or `/opt/intassist/.env` in production),
+then restart the backend (`npm start`, or `docker compose restart backend`).
+
+### Recall.ai (the meeting bot)
+
+1. Create an account at [recall.ai](https://www.recall.ai) and note your **region** (`us-west-2`, `us-east-1`, `eu-central-1` or
+   `ap-northeast-1`). Keys only work in the region they were created in.
+2. In the Recall dashboard create an **API key**, and under Developers add a **webhook endpoint**
+   `https://<your-backend-domain>/webhooks/recall`; copy its verification secret (`whsec_...`).
+3. Set in the env file:
+
+   ```
+   RECALL_API_KEY=<your api key>
+   RECALL_REGION=us-west-2
+   RECALL_WEBHOOK_SECRET=whsec_...
+   PUBLIC_BASE_URL=https://<your-backend-domain>     # no trailing slash, must be public HTTPS
+   # optional: BOT_NAME=Interview Assist   TRANSCRIPT_LANGUAGE=en
+   ```
+
+   Set all of these or none: with `RECALL_API_KEY` set but the others missing, the backend reports what is missing. With none set,
+   no real bot is created. For local testing use a tunnel (ngrok, Cloudflare Tunnel) as `PUBLIC_BASE_URL`.
+4. Details and troubleshooting: [doc/recall-integration.md](doc/recall-integration.md).
+
+### AI models (the scoring and coaching)
+
+The backend calls models through two providers. Set the keys for the ones you use:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...                       # Claude (console.anthropic.com)
+AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com   # optional: Azure OpenAI / Foundry
+AZURE_OPENAI_API_KEY=...
+```
+
+- **Anthropic only is enough.** Several tasks default to an Azure model first and fall back to Claude, so with no Azure
+  settings they still work but each call first tries and fails on Azure. Avoid that by reassigning those tasks (next point).
+- **Choose which model does what** without redeploying: sign in as an admin and open **AI settings**. Admins are the users listed in
+  `ADMIN_SUBJECTS` (sign in once, call `GET /api/me`, copy `subject`, put it in `ADMIN_SUBJECTS`, restart). For each task
+  (live coach, answer scoring, opening questions, scorecard, assist) pick a primary and fallback model.
+- **Model list:** the available models are in `backend/src/ai/models.ts` (`CATALOG`). Azure entries are *deployment names* on your
+  Azure resource, so edit them to match your deployments. Defaults per task are in `backend/src/ai/tasks/*.ts`.
+- Restart the backend after changing keys. Check the backend logs if a task fails; a missing key shows as
+  `ANTHROPIC_API_KEY is not set` or `AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY are not set`.
+
 ## Deploying to your own environment
 
 Production is one Linux VM running Docker Compose: **Caddy** (HTTPS, serves the built web app) and the **backend**
@@ -156,7 +218,12 @@ STRIPE_SECRET_KEY=sk_test_...        # https://dashboard.stripe.com/apikeys
 WEB_BASE_URL=http://localhost:5173   # where Stripe sends people back
 ```
 
-Leave `STRIPE_SECRET_KEY` empty and the web app shows no payment option. The backend creates a Stripe Checkout session
+Leave `STRIPE_SECRET_KEY` empty and the web app shows no payment amounts (the small "found it useful?" line stays, without them).
+
+**If you run your own copy,** the contribution prompts say this instance costs infrastructure, meeting-bot and AI money to run.
+Reword them for your own situation in `web/src/components/Support.tsx` (`SupportCard` and `SupportNote`). The Stripe keys are
+yours, so payments go to your Stripe account. To remove the prompts, delete `<SupportCard />` from `web/src/pages/Interviews.tsx`
+and `<SupportNote />` from `web/src/components/SetupForm.tsx`. The backend creates a Stripe Checkout session
 (`POST /api/me/support/checkout`); amounts are fixed in `backend/src/support.ts`. For the Azure deploy, store the key as the
 Key Vault secret `stripe-secret-key`. Payments are not tracked in the database: the Stripe dashboard is the record.
 
@@ -167,6 +234,7 @@ cd backend && npm test && npm run typecheck
 cd web && npm test && npm run typecheck
 ```
 
-## License
+## License and sponsor
 
-[Apache License 2.0](LICENSE): free to use, modify and distribute, including commercially.
+Source: <https://github.com/blackarck/intaiassist>. Released under the [Apache License 2.0](LICENSE): free to use, modify and distribute,
+including commercially. Contributions are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Interview Assist is sponsored by [Proso.ai](https://proso.ai).

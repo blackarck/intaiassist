@@ -36,7 +36,7 @@ export const scorecard: TaskDef<I, O> = {
   finalize: (o) => {
     if (VERDICT.test([o.summary, ...o.strengths, ...o.risks, ...o.followUpsNextRound].join(" "))) throw new FinalizeError("do not state a hiring decision; describe the evidence only");
   },
-  defaults: { primary: "anthropic:sonnet", fallback: "azure:gpt-5.4", timeoutMs: 40_000, deadlineMs: 90_000, maxOutputTokens: 1200 },
+  defaults: { primary: "azure:gpt-6-luna", fallback: "anthropic:haiku", timeoutMs: 40_000, deadlineMs: 90_000, maxOutputTokens: 1200 },
   sample: {
     role: "Backend Engineer",
     items: [

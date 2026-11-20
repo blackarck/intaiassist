@@ -1,5 +1,5 @@
 import { InMemoryAiStore } from "./ai/configStore.js";
-import { envModelFactory } from "./ai/models.js";
+import { availableModels, envModelFactory } from "./ai/models.js";
 import { buildApp } from "./app.js";
 import { anyOf, googleVerifier, microsoftVerifier, type TokenVerifier } from "./auth.js";
 import { LogBotController, RecallBotController, type BotController } from "./botController.js";
@@ -64,7 +64,7 @@ else console.warn("DATABASE_PATH not set: using the in-memory store (state is lo
 // AI coaching (question suggestions, answer scoring). Provider keys come from the environment; a model is only built
 // when a task is actually routed to it, so a missing key affects only the tasks that use that provider.
 const aiStore = sqlite ?? new InMemoryAiStore();
-const ai = { config: aiStore, log: aiStore, models: envModelFactory(process.env) };
+const ai = { config: aiStore, log: aiStore, models: envModelFactory(process.env), available: availableModels(process.env).map((m) => m.id) };
 
 // The live coaching room needs the SQLite store (rooms live beside the interviews they belong to).
 const room = new RoomService({

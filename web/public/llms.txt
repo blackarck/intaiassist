@@ -1,0 +1,22 @@
+# Interview Assist
+
+> Open source AI assistant for interviewers. A visible bot joins a Microsoft Teams, Zoom or Google Meet interview, transcribes it live, scores each candidate answer and suggests follow-up questions. Only the interviewer sees the coaching; the assistant never speaks in the meeting. Sponsored by Proso.ai. Apache License 2.0.
+
+## What it does
+- Live transcript of the interview.
+- Scores every answer on correctness, depth, clarity and relevance, quoting weak phrases and describing a stronger answer.
+- Suggests two or three follow-up questions, refreshed while the candidate is still talking.
+- Sign in with a Microsoft work, school or personal account (any tenant).
+
+## Important to know
+- A bot named "Interview Assist" joins the call and must be admitted from the lobby.
+- The meeting is recorded and transcribed. Interviewers must tell all participants and get their permission first; recording laws vary by place.
+- Meeting audio and transcripts are processed by Recall.ai; AI analysis uses Anthropic Claude and Azure OpenAI models and results are stored in the operator's private cloud.
+- Scores and suggestions are AI-generated and can be wrong. Humans make the hiring decision. Use at your own risk.
+
+## Links
+- [Home](https://intassist.askproso.ai/): product overview and sign-in
+- [Terms of Service](https://intassist.askproso.ai/terms)
+- [Privacy Policy](https://intassist.askproso.ai/privacy)
+- [Source code and self-hosting instructions](https://github.com/blackarck/intaiassist): README covers bringing your own Recall.ai and AI keys
+- [Proso.ai](https://proso.ai): sponsor

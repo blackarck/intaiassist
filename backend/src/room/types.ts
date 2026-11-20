@@ -11,6 +11,8 @@ export interface RoomSetup {
   jd: string;
   resumeSummary?: string;
   presetQuestions: PresetQuestion[];
+  /** Catalog id of the AI model the interviewer chose for this interview. Unset = the operator's per-task defaults. */
+  aiModel?: string;
 }
 
 export interface RoomQuestion {

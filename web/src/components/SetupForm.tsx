@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api";
 import type { Question } from "../types";
+import { SupportNote } from "./Support";
 import { ErrorNote } from "./ui";
 
 interface Preset { text: string; keyPoints: string }
@@ -13,6 +14,8 @@ export function SetupForm({ id, onSaved }: { id: string; onSaved: () => void }) 
   const [roleLevel, setRoleLevel] = useState("");
   const [jd, setJd] = useState("");
   const [resume, setResume] = useState("");
+  const [aiModel, setAiModel] = useState("");
+  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
   const [presets, setPresets] = useState<Preset[]>([{ text: "", keyPoints: "" }]);
   const [busy, setBusy] = useState<"save" | "suggest" | undefined>();
   const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
@@ -20,19 +23,26 @@ export function SetupForm({ id, onSaved }: { id: string; onSaved: () => void }) 
 
   // Come back to what was saved before.
   useEffect(() => {
-    api<{ setup: { roleTitle: string; roleLevel?: string; jd: string; resumeSummary?: string; presetQuestions: { text: string; keyPoints?: string[] }[] } | null }>(`/api/interviews/${id}/setup`)
+    api<{ setup: { aiModel?: string; roleTitle: string; roleLevel?: string; jd: string; resumeSummary?: string; presetQuestions: { text: string; keyPoints?: string[] }[] } | null }>(`/api/interviews/${id}/setup`)
       .then(({ setup }) => {
         if (!setup) return;
         setRoleTitle(setup.roleTitle);
         setRoleLevel(setup.roleLevel ?? "");
         setJd(setup.jd);
         setResume(setup.resumeSummary ?? "");
+        setAiModel(setup.aiModel ?? "");
         setPresets(setup.presetQuestions.length ? setup.presetQuestions.map((p) => ({ text: p.text, keyPoints: (p.keyPoints ?? []).join("\n") })) : [{ text: "", keyPoints: "" }]);
       })
       .catch(() => undefined); // an empty form is a fine fallback
   }, [id]);
 
+  // The models this server can actually use (providers with credentials). Empty = only the automatic choice.
+  useEffect(() => {
+    api<{ models: { id: string; label: string }[] }>("/api/me/ai-models").then((r) => setModels(r.models)).catch(() => undefined);
+  }, []);
+
   const body = () => ({
+    aiModel: aiModel || undefined,
     roleTitle: roleTitle.trim(),
     roleLevel: roleLevel || undefined,
     jd: jd.trim(),
@@ -92,6 +102,17 @@ export function SetupForm({ id, onSaved }: { id: string; onSaved: () => void }) 
         <textarea id="resume" className="input min-h-32" value={resume} onChange={(e) => setResume(e.target.value)} placeholder="Paste the candidate's resume or a summary" maxLength={20000} />
       </div>
 
+      {models.length > 0 && (
+        <div>
+          <label className="label" htmlFor="ai-model">AI model <span className="normal-case muted">(optional)</span></label>
+          <select id="ai-model" className="input" value={aiModel} onChange={(e) => setAiModel(e.target.value)}>
+            <option value="">Automatic (recommended)</option>
+            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          <p className="mt-1 text-xs muted">Used to assess answers and suggest questions in this interview. Automatic picks the best model for each job; if your choice is unavailable or too slow, it falls back to the automatic choice.</p>
+        </div>
+      )}
+
       <fieldset className="space-y-3">
         <legend className="label">Questions you plan to ask</legend>
         {presets.map((p, i) => (
@@ -130,6 +151,8 @@ export function SetupForm({ id, onSaved }: { id: string; onSaved: () => void }) 
           {busy === "suggest" ? "Thinking…" : "Suggest more questions"}
         </button>
       </div>
+
+      <SupportNote />
 
       {suggested.length > 0 && (
         <section aria-label="Suggested questions" className="space-y-2">

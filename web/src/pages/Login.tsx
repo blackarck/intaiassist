@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth";
+import { SiteFooter } from "../components/SiteFooter";
 import { ErrorNote } from "../components/ui";
 
 function MicrosoftIcon() {
@@ -49,37 +50,29 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
   );
 }
 
-export function LegalFooter() {
-  return (
-    <footer className="border-t border-zinc-200 py-8 text-sm muted dark:border-zinc-800">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-4">
-        <span>© {new Date().getFullYear()} Interview Assist</span>
-        <Link className="hover:underline" to="/terms">Terms &amp; Conditions</Link>
-        <Link className="hover:underline" to="/privacy">Privacy Policy</Link>
-      </div>
-    </footer>
-  );
-}
-
 export function LoginPage() {
   const { error } = useAuth();
   return (
     <div className="min-h-screen">
-      <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+      <header className="mx-auto max-w-5xl px-4 py-4">
         <span className="font-semibold tracking-tight">Interview Assist</span>
-        <SignInButton className="btn-ghost" />
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-20 px-4 pb-20 pt-10">
-        <section className="max-w-2xl space-y-5">
-          <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">A second pair of ears for every interview.</h1>
-          <p className="text-lg muted">
-            Interview Assist helps interviewers run better, fairer conversations. It follows your Teams, Zoom or Google Meet interview live, assesses each answer as it is given, and suggests the follow-up questions that will help you make a confident decision.
-          </p>
-          {error && <ErrorNote>{error}</ErrorNote>}
-          <div className="flex flex-wrap items-center gap-3">
-            <SignInButton />
-            <span className="text-xs muted">Work, school and personal Microsoft accounts are supported.</span>
+      <main className="mx-auto max-w-5xl space-y-20 px-4 pb-20 pt-6">
+        <section className="grid items-center gap-10 lg:grid-cols-[1.2fr_1fr]">
+          <div className="space-y-5">
+            <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">A second pair of ears for every interview.</h1>
+            <p className="text-lg muted">
+              Interview Assist helps interviewers run better, fairer conversations. It follows your Teams, Zoom or Google Meet interview live, assesses each answer as it is given, and suggests the follow-up questions that will help you make a confident decision.
+            </p>
+          </div>
+          <div className="card space-y-4 p-6 shadow-md">
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-400">Interviewer sign-in</p>
+            <h2 className="text-xl font-semibold tracking-tight">Start your next interview</h2>
+            <p className="text-sm muted">Sign in with Microsoft to set up an interview and invite the assistant. Work, school and personal accounts are supported.</p>
+            {error && <ErrorNote>{error}</ErrorNote>}
+            <SignInButton className="btn-primary w-full" />
+            <p className="text-xs muted">By continuing you agree to the <Link className="underline" to="/terms">Terms of Service</Link> and <Link className="underline" to="/privacy">Privacy Policy</Link>, and confirm you will get everyone's consent before recording an interview.</p>
           </div>
         </section>
 
@@ -102,7 +95,7 @@ export function LoginPage() {
           <p className="muted text-sm">The result is more consistent assessments across your team, better follow-up questions, and a written record to support the hiring decision. You stay in charge: the assistant advises, you decide.</p>
         </section>
 
-        <section className="space-y-6">
+        <section id="how-it-works" className="space-y-6 scroll-mt-6">
           <h2 className="text-2xl font-semibold tracking-tight">How it works</h2>
           <ol className="space-y-5">
             <Step n={1} title="Sign in and add your interview">Sign in with Microsoft, paste the meeting link and add the role and what you want to assess.</Step>
@@ -111,23 +104,17 @@ export function LoginPage() {
           </ol>
         </section>
 
-        <section className="card space-y-3 border-indigo-200 bg-indigo-50/60 p-6 dark:border-indigo-900 dark:bg-indigo-950/30">
+        <section id="consent" className="card scroll-mt-6 space-y-3 border-indigo-200 bg-indigo-50/60 p-6 dark:border-indigo-900 dark:bg-indigo-950/30">
           <h2 className="text-xl font-semibold tracking-tight">Be open with everyone on the call</h2>
           <p className="text-sm">
             A visible bot will appear in the participant list and the meeting is recorded and transcribed. <strong>Before you use Interview Assist, tell the candidate and every other participant that the meeting will be recorded and analysed by an AI tool, and get their permission.</strong> Recording laws differ by country and state, and some require consent from everyone on the call. Using the tool is entirely at your own risk and you are responsible for complying with them.
           </p>
           <p className="text-sm muted">
-            Audio and transcripts are handled by our meeting-bot provider, <a className="underline" href="https://www.recall.ai" target="_blank" rel="noreferrer">Recall.ai</a>, and analysed by our AI, which stores interview data in our private AI cloud. See the <Link className="underline" to="/privacy">Privacy Policy</Link> and <Link className="underline" to="/terms">Terms &amp; Conditions</Link> for details.
+            Audio and transcripts are handled by our meeting-bot provider, <a className="underline" href="https://www.recall.ai" target="_blank" rel="noreferrer">Recall.ai</a>, and analysed by our AI, which stores interview data in our private AI cloud. See the <Link className="underline" to="/privacy">Privacy Policy</Link> and <Link className="underline" to="/terms">Terms of Service</Link> for details.
           </p>
         </section>
-
-        <section className="flex flex-col items-start gap-3">
-          <h2 className="text-2xl font-semibold tracking-tight">Ready for your next interview?</h2>
-          <SignInButton />
-          <p className="max-w-xl text-xs muted">By signing in you confirm that you have read and agree to the <Link className="underline" to="/terms">Terms &amp; Conditions</Link> and <Link className="underline" to="/privacy">Privacy Policy</Link>, and that you will get consent from everyone before recording an interview.</p>
-        </section>
       </main>
-      <LegalFooter />
+      <SiteFooter />
     </div>
   );
 }

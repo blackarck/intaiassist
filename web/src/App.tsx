@@ -2,6 +2,7 @@ import { BrowserRouter, Link, NavLink, Route, Routes, useLocation } from "react-
 import { AuthProvider, useAuth } from "./auth";
 import { Spinner } from "./components/ui";
 import { useMe } from "./hooks";
+import { usePageMeta } from "./pageMeta";
 import { AdminPage } from "./pages/Admin";
 import { InterviewPage } from "./pages/Interview";
 import { InterviewsPage } from "./pages/Interviews";
@@ -12,6 +13,7 @@ function Shell() {
   const auth = useAuth();
   const me = useMe();
   const { pathname } = useLocation();
+  usePageMeta(pathname, auth.status === "signedIn");
   if (pathname === "/terms") return <TermsPage />;
   if (pathname === "/privacy") return <PrivacyPage />;
   if (auth.status === "loading") return <div className="grid min-h-screen place-items-center"><Spinner /></div>;

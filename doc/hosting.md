@@ -13,11 +13,11 @@ operator / portal ► https://intassistback.askproso.ai/api/...   ─┘
 
 | Item | Value |
 |---|---|
-| Resource group / region | `vaiintassist` / `eastus`, subscription `D365-Team-Subscription` |
+| Resource group / region | `<your-resource-group>` / `eastus`, your Azure subscription |
 | VM | `intassist-backend`, Ubuntu 24.04, `Standard_B2als_v2` (2 vCPU, 4 GiB), 30 GB disk |
-| Public IP | `168.62.166.49` (static) |
+| Public IP | `<VM_PUBLIC_IP>` (static) |
 | Network rules | 80 and 443 open to the internet; SSH (22) only from one IP, kept current by the deploy script |
-| Secrets | Key Vault `vaiintassist-kv-f9ea`; the VM reads them with its managed identity and writes `/opt/intassist/.env` (mode 600) |
+| Secrets | Key Vault `<your-key-vault>`; the VM reads them with its managed identity and writes `/opt/intassist/.env` (mode 600) |
 | Data | SQLite on the Docker volume `backend_data` (see [data.md](data.md)); certificates on `caddy_data` |
 
 Approximate cost (East US list prices, 24/7): VM about $27, static IP about $4, disk a few dollars, so **about $34 a month**.
@@ -31,8 +31,8 @@ All records live at the registrar's DNS for `askproso.ai` (name servers `dns1/dn
 
 | Host | Type | Value | Purpose | Status |
 |---|---|---|---|---|
-| `intassistback` | A | `168.62.166.49` | Backend: Recall webhooks, SendGrid inbound webhook, API, health check | **Done and live** (Let's Encrypt certificate issued by Caddy, valid to 2027-02-17, renewed automatically) |
-| `intassist` | A | `168.62.166.49` | Frontend (portal). Nothing serves it yet; see below | Placeholder. **Delete the old record that points to `20.102.63.2`** |
+| `intassistback` | A | `<VM_PUBLIC_IP>` | Backend: Recall webhooks, SendGrid inbound webhook, API, health check | **Done and live** (Let's Encrypt certificate issued by Caddy, valid to 2027-02-17, renewed automatically) |
+| `intassist` | A | `<VM_PUBLIC_IP>` | Frontend (portal). Nothing serves it yet; see below | Placeholder. **Delete the old record that points to `<OLD_IP>`** |
 | `invite` | MX, priority 10 | `mx.sendgrid.net` | Receives invite e-mail (SendGrid Inbound Parse). A dedicated subdomain, so the root domain's mail is untouched | To do ([inbound-email.md](inbound-email.md)) |
 | (3 records) | CNAME | values shown by SendGrid | SendGrid domain authentication (needed to send e-mail, and per SendGrid's API docs the Inbound Parse hostname must be an authenticated domain) | To do |
 
@@ -64,7 +64,7 @@ One-time VM creation: `infra/azure/provision-backend-vm.sh` (already done). Secr
 ## Operating it
 
 ```bash
-ssh -i ~/.ssh/intassist_vm azureuser@168.62.166.49
+ssh -i ~/.ssh/<your-key> <admin-user>@<VM_PUBLIC_IP>
 cd /opt/intassist/app/deploy
 sudo docker compose --env-file /opt/intassist/.env ps
 sudo docker compose --env-file /opt/intassist/.env logs --tail 100 backend
@@ -72,7 +72,7 @@ sudo docker compose --env-file /opt/intassist/.env restart backend
 ```
 
 If your IP changed and SSH times out, the next `deploy-backend.sh` run fixes the rule, or run:
-`az network nsg rule update -g vaiintassist --nsg-name intassist-backend-nsg -n allow-ssh-me --source-address-prefixes <your-ip>`.
+`az network nsg rule update -g <your-resource-group> --nsg-name intassist-backend-nsg -n allow-ssh-me --source-address-prefixes <your-ip>`.
 
 ## Known limits
 

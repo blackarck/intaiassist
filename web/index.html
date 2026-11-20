@@ -3,10 +3,70 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Interview Assist</title>
+    <title>Interview Assist: AI interview assistant for Teams, Zoom and Google Meet</title>
+    <meta name="description" content="Interview Assist joins your Teams, Zoom or Google Meet interview, transcribes it live, scores each candidate answer on correctness, depth, clarity and relevance, and suggests follow-up questions. Open source." />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="canonical" href="https://intassist.askproso.ai/" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="Summary for AI assistants" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Interview Assist" />
+    <meta property="og:title" content="Interview Assist: a second pair of ears for every interview" />
+    <meta property="og:description" content="Live transcript, real-time answer scoring and follow-up questions for interviewers on Teams, Zoom and Google Meet. Open source, sponsored by Proso.ai." />
+    <meta property="og:url" content="https://intassist.askproso.ai/" />
+    <meta property="og:image" content="https://intassist.askproso.ai/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Interview Assist scoring a candidate's answer during an interview" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Interview Assist: a second pair of ears for every interview" />
+    <meta name="twitter:description" content="Live transcript, real-time answer scoring and follow-up questions for interviewers. Open source." />
+    <meta name="twitter:image" content="https://intassist.askproso.ai/og-image.png" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://intassist.askproso.ai/#app",
+            "name": "Interview Assist",
+            "url": "https://intassist.askproso.ai/",
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Web",
+            "description": "An AI assistant for interviewers. A bot joins a Microsoft Teams, Zoom or Google Meet interview, transcribes it live, scores each candidate answer and suggests follow-up questions. Only the interviewer sees the coaching.",
+            "featureList": ["Live interview transcript", "Real-time answer scoring on correctness, depth, clarity and relevance", "Suggested follow-up questions", "Works with Microsoft Teams, Zoom and Google Meet"],
+            "license": "https://www.apache.org/licenses/LICENSE-2.0",
+            "isAccessibleForFree": true,
+            "codeRepository": "https://github.com/blackarck/intaiassist",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "sponsor": { "@id": "https://proso.ai/#org" }
+          },
+          { "@type": "Organization", "@id": "https://proso.ai/#org", "name": "Proso.ai", "url": "https://proso.ai" },
+          {
+            "@type": "FAQPage",
+            "mainEntity": [
+              { "@type": "Question", "name": "What is Interview Assist?", "acceptedAnswer": { "@type": "Answer", "text": "An open source AI assistant for interviewers. A meeting bot joins the call, transcribes it live, assesses each answer and suggests follow-up questions that help with the assessment." } },
+              { "@type": "Question", "name": "Does a bot join my meeting?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A visible bot named Interview Assist joins as a participant and must be admitted from the lobby, otherwise it cannot hear the conversation." } },
+              { "@type": "Question", "name": "Do I need consent to record the interview?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Tell the candidate and every participant that the meeting is recorded, transcribed and analysed by AI, and get their permission first. Recording laws differ by country and state." } },
+              { "@type": "Question", "name": "Who sees the coaching?", "acceptedAnswer": { "@type": "Answer", "text": "Only the interviewer. The assistant never speaks or types in the meeting." } },
+              { "@type": "Question", "name": "Where is interview data stored?", "acceptedAnswer": { "@type": "Answer", "text": "Meeting audio and transcripts are processed by Recall.ai. AI analysis results are stored in the operator's private AI cloud. See the Privacy Policy for details." } },
+              { "@type": "Question", "name": "Can I run it myself?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. It is open source under the Apache License 2.0 at https://github.com/blackarck/intaiassist. Bring your own Recall.ai and AI model keys." } }
+            ]
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <h1>Interview Assist: an AI interview assistant</h1>
+      <p>Interview Assist joins your Microsoft Teams, Zoom or Google Meet interview as a visible bot, transcribes it live, scores each candidate answer on correctness, depth, clarity and relevance, and suggests follow-up questions. Only the interviewer sees the coaching. Tell everyone on the call that it is recorded and get their permission first.</p>
+      <p>Open source under the Apache License 2.0: <a href="https://github.com/blackarck/intaiassist">github.com/blackarck/intaiassist</a>. Sponsored by <a href="https://proso.ai">Proso.ai</a>. <a href="/terms">Terms of Service</a> · <a href="/privacy">Privacy Policy</a>. This site needs JavaScript to sign in.</p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

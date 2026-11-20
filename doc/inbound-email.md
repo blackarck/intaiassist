@@ -86,7 +86,7 @@ after the switch is not verified; test by mailing an existing forwarding address
 - **Receiving domain / Host name:** subdomain `invite`, and in the domain list choose `askproso.ai` (together: `invite.askproso.ai`).
   Only your authenticated domains appear in that list.
 - **Destination URL:** `https://intassistback.askproso.ai/inbound/sendgrid/<inbound-token>`. Get the token with:
-  `az keyvault secret show --vault-name vaiintassist-kv-f9ea --name inbound-token --query value -o tsv`
+  `az keyvault secret show --vault-name <your-key-vault> --name inbound-token --query value -o tsv`
 - **Check incoming emails for spam:** leave **off**.
 - **POST the raw, full MIME message:** tick **on**. Without it the backend cannot read the calendar part and answers `raw_mime_required`.
 - Save. The pair appears in a table; the gear icon on its right edits or removes it.

@@ -74,3 +74,33 @@ export function SupportCard() {
     </div>
   );
 }
+
+/** A one-line, low-key reminder shown under the interview setup form. Same optional payment as SupportCard; nothing is gated. */
+export function SupportNote() {
+  const { data } = useLoad<{ enabled: boolean; amounts: number[] }>("/api/me/support");
+  const [busy, setBusy] = useState<number>();
+  const [error, setError] = useState<string>();
+  const amounts = data?.enabled ? data.amounts : [];
+
+  const pay = async (amount: number) => {
+    setBusy(amount);
+    setError(undefined);
+    try {
+      const { url } = await api<{ url: string }>("/api/me/support/checkout", { method: "POST", body: { amount } });
+      window.location.assign(url);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not start the payment.");
+      setBusy(undefined);
+    }
+  };
+
+  return (
+    <p className="text-xs muted">
+      Found Interview Assist useful? It costs real money to run (servers, the meeting bot and AI models), so a small contribution helps keep it going. Entirely optional.
+      {amounts.map((a) => (
+        <button key={a} type="button" className="ml-2 underline hover:no-underline disabled:opacity-50" disabled={busy !== undefined} onClick={() => pay(a)}>{busy === a ? "Opening…" : `$${a}`}</button>
+      ))}
+      {error && <span className="ml-2 text-red-700 dark:text-red-400">{error}</span>}
+    </p>
+  );
+}

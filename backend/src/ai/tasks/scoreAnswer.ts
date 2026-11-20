@@ -87,7 +87,7 @@ export const scoreAnswer: TaskDef<I, O> = {
     if (Math.abs(o.score - mean) > 1.5) throw new FinalizeError(`overall score ${o.score} does not fit the dimension scores (mean ${mean.toFixed(1)})`);
     if (i.transcriptQuality === "noisy" && o.confidence === "high") throw new FinalizeError("confidence cannot be high when the transcript is noisy");
   },
-  defaults: { primary: "anthropic:sonnet", fallback: "azure:gpt-5.4", timeoutMs: 30_000, deadlineMs: 60_000, maxOutputTokens: 2000 },
+  defaults: { primary: "azure:gpt-6-luna", fallback: "anthropic:haiku", timeoutMs: 30_000, deadlineMs: 60_000, maxOutputTokens: 2000 },
   sample: {
     question: { text: "What happens when a database connection pool is exhausted?", keyPoints: ["requests queue or time out", "find the leak or slow query", "set timeouts and limits"] },
     answer: "The requests that need a connection wait in a queue until one frees up, and if they wait too long they time out. Usually it means something is holding connections, a slow query or a connection that was never released. You find it with the database's active session view, then add statement timeouts and sensible pool limits.",

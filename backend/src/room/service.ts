@@ -428,7 +428,8 @@ export class RoomService {
     if (this.aiActive >= (this.d.maxConcurrentAi ?? 4)) await new Promise<void>((r) => this.aiWaiting.push(r));
     this.aiActive++;
     try {
-      return await runTask(this.d.ai, task, input, { interviewId });
+      const model = (await this.d.rooms.getSetup(interviewId))?.aiModel;
+      return await runTask(this.d.ai, task, input, { interviewId, model });
     } finally {
       this.aiActive--;
       this.aiWaiting.shift()?.();

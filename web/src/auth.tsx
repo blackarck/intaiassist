@@ -105,12 +105,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (config.devUser) return;
-    try {
-      await msal?.logoutPopup({ account, mainWindowRedirectUri: `${window.location.origin}/` });
-    } catch {
-      clearStaleInteraction();
-      await msal?.clearCache({ account }).catch(() => undefined);
-    }
+    // Sign out locally. A Microsoft logout popup used to open the whole app inside the popup and leave this window as it was.
+    // The next sign-in always asks which account to use (prompt: select_account), so a shared computer is not a problem.
+    clearStaleInteraction();
+    await msal?.clearCache({ account }).catch(() => undefined);
     setAccount(undefined);
     setStatus("signedOut");
     // Always land on the login page, not on whatever interview URL we were on.

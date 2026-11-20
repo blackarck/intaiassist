@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth";
-import { LegalFooter } from "./Login";
+import { SiteFooter } from "../components/SiteFooter";
 
 const UPDATED = "20 November 2026";
 
@@ -19,14 +19,14 @@ function Page({ title, children }: { title: string; children: ReactNode }) {
         {children}
         <p className="muted pt-6">This page is a plain-language summary and not legal advice. Have it reviewed by a lawyer for your jurisdiction before relying on it.</p>
       </main>
-      <LegalFooter />
+      <SiteFooter />
     </div>
   );
 }
 
 export function TermsPage() {
   return (
-    <Page title="Terms & Conditions">
+    <Page title="Terms of Service">
       <p>These terms govern your use of Interview Assist (the “Service”). By signing in or using the Service you agree to them. If you do not agree, do not use the Service.</p>
 
       <h2>1. What the Service does</h2>

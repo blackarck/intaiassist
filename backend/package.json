@@ -18,7 +18,7 @@
     "@fastify/helmet": "^13.2.0",
     "@fastify/multipart": "^10.1.9",
     "@fastify/rate-limit": "^11.2.2",
-    "ai": "^7.0.177",
+    "ai": "^7.0.181",
     "fastify": "^5.12.8",
     "jose": "^6.2.18",
     "mailparser": "^3.14.5",
